@@ -15,6 +15,9 @@
 package v1alpha1
 
 import (
+	"crypto/sha256"
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -67,15 +70,54 @@ type ModelValidationSpec struct {
 	Config ValidationConfig `json:"config"`
 }
 
+// PodTrackingInfo contains information about a tracked pod
+type PodTrackingInfo struct {
+	// Name is the name of the pod
+	Name string `json:"name"`
+	// UID is the unique identifier of the pod
+	UID string `json:"uid"`
+	// InjectedAt is when the pod was injected
+	InjectedAt metav1.Time `json:"injectedAt"`
+}
+
 // ModelValidationStatus defines the observed state of ModelValidation
 type ModelValidationStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// InjectedPodCount is the number of pods that have been injected with validation
+	InjectedPodCount int32 `json:"injectedPodCount"`
+
+	// UninjectedPodCount is the number of pods that have the label but were not injected
+	UninjectedPodCount int32 `json:"uninjectedPodCount"`
+
+	// OrphanedPodCount is the number of injected pods that reference this CR but are inconsistent
+	OrphanedPodCount int32 `json:"orphanedPodCount"`
+
+	// AuthMethod indicates which authentication method is being used
+	AuthMethod string `json:"authMethod,omitempty"`
+
+	// InjectedPods contains detailed information about injected pods
+	InjectedPods []PodTrackingInfo `json:"injectedPods,omitempty"`
+
+	// UninjectedPods contains detailed information about pods that should have been injected but weren't
+	UninjectedPods []PodTrackingInfo `json:"uninjectedPods,omitempty"`
+
+	// OrphanedPods contains detailed information about pods that are injected but inconsistent
+	OrphanedPods []PodTrackingInfo `json:"orphanedPods,omitempty"`
+
+	// LastUpdated is the timestamp of the last status update
+	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Auth Method",type=string,JSONPath=`.status.authMethod`
+// +kubebuilder:printcolumn:name="Injected Pods",type=integer,JSONPath=`.status.injectedPodCount`
+// +kubebuilder:printcolumn:name="Uninjected Pods",type=integer,JSONPath=`.status.uninjectedPodCount`
+// +kubebuilder:printcolumn:name="Orphaned Pods",type=integer,JSONPath=`.status.orphanedPodCount`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ModelValidation is the Schema for the modelvalidations API
 type ModelValidation struct {
@@ -93,6 +135,42 @@ type ModelValidationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ModelValidation `json:"items"`
+}
+
+// GetAuthMethod returns the authentication method being used
+func (mv *ModelValidation) GetAuthMethod() string {
+	if mv.Spec.Config.SigstoreConfig != nil {
+		return "sigstore"
+	} else if mv.Spec.Config.PkiConfig != nil {
+		return "pki"
+	} else if mv.Spec.Config.PrivateKeyConfig != nil {
+		return "private-key"
+	}
+	return "unknown"
+}
+
+// GetConfigHash returns a hash of the validation configuration for drift detection
+func (mv *ModelValidation) GetConfigHash() string {
+	return mv.Spec.Config.GetConfigHash()
+}
+
+// GetConfigHash returns a hash of the validation configuration for drift detection
+func (vc *ValidationConfig) GetConfigHash() string {
+	hasher := sha256.New()
+
+	if vc.SigstoreConfig != nil {
+		hasher.Write([]byte("sigstore"))
+		hasher.Write([]byte(vc.SigstoreConfig.CertificateIdentity))
+		hasher.Write([]byte(vc.SigstoreConfig.CertificateOidcIssuer))
+	} else if vc.PkiConfig != nil {
+		hasher.Write([]byte("pki"))
+		hasher.Write([]byte(vc.PkiConfig.CertificateAuthority))
+	} else if vc.PrivateKeyConfig != nil {
+		hasher.Write([]byte("privatekey"))
+		hasher.Write([]byte(vc.PrivateKeyConfig.KeyPath))
+	}
+
+	return fmt.Sprintf("%x", hasher.Sum(nil))[:16] // Use first 16 chars for brevity
 }
 
 func init() {

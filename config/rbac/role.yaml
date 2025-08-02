@@ -13,6 +13,21 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/finalizers
+  verbs:
+  - update
+- apiGroups:
   - ml.sigstore.dev
   resources:
   - modelvalidations
@@ -25,6 +40,4 @@ rules:
   resources:
   - modelvalidations/status
   verbs:
-  - get
-  - patch
   - update

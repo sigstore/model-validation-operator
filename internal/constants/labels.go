@@ -24,6 +24,18 @@ const (
 	// IgnoreNamespaceLabel is the label used to ignore a namespace for model validation
 	IgnoreNamespaceLabel = ModelValidationDomain + "/ignore"
 
-	// ModelValidationInitContainerName is the name of the init container injected for model validation
-	ModelValidationInitContainerName = "model-validation"
+	// ModelValidationFinalizer is the finalizer used to track model validation pods
+	ModelValidationFinalizer = ModelValidationDomain + "/finalizer"
+
+	// InjectedAnnotationKey is the annotation key used to track injected pods
+	InjectedAnnotationKey = ModelValidationDomain + "/injected-at"
+
+	// AuthMethodAnnotationKey is the annotation key used to track the auth method used during injection
+	AuthMethodAnnotationKey = ModelValidationDomain + "/auth-method"
+
+	// ConfigHashAnnotationKey is the annotation key used to track the configuration hash during injection
+	ConfigHashAnnotationKey = ModelValidationDomain + "/config-hash"
+
+	// IgnoreNamespaceValue is the value for the ignore namespace label
+	IgnoreNamespaceValue = "true"
 )

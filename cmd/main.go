@@ -20,8 +20,11 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
+	"github.com/sigstore/model-validation-operator/internal/controller"
+	"github.com/sigstore/model-validation-operator/internal/tracker"
 	"github.com/sigstore/model-validation-operator/internal/utils"
 	"github.com/sigstore/model-validation-operator/internal/webhooks"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -43,6 +46,16 @@ import (
 
 	mlv1alpha1 "github.com/sigstore/model-validation-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
+)
+
+const (
+	// Default configuration values for the status tracker
+	defaultDebounceDuration    = 500 * time.Millisecond
+	defaultRetryBaseDelay      = 100 * time.Millisecond
+	defaultRetryMaxDelay       = 16 * time.Second
+	defaultRateLimitQPS        = 10.0
+	defaultRateLimitBurst      = 100
+	defaultStatusUpdateTimeout = 30 * time.Second
 )
 
 var (
@@ -67,6 +80,14 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+
+	// Status tracker configuration
+	var debounceDuration time.Duration
+	var retryBaseDelay time.Duration
+	var retryMaxDelay time.Duration
+	var rateLimitQPS float64
+	var rateLimitBurst int
+	var statusUpdateTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -89,6 +110,20 @@ func main() {
 		"MODEL_TRANSPARENCY_CLI_IMAGE",
 		constants.ModelTransparencyCliImage,
 		"Model transparency CLI image to be used.")
+
+	// Status tracker configuration flags
+	flag.DurationVar(&debounceDuration, "debounce-duration", defaultDebounceDuration,
+		"Time to wait for more changes before updating status")
+	flag.DurationVar(&retryBaseDelay, "retry-base-delay", defaultRetryBaseDelay,
+		"Base delay for exponential backoff retries")
+	flag.DurationVar(&retryMaxDelay, "retry-max-delay", defaultRetryMaxDelay,
+		"Maximum delay for exponential backoff retries")
+	flag.Float64Var(&rateLimitQPS, "rate-limit-qps", defaultRateLimitQPS,
+		"Overall rate limit for status updates (queries per second)")
+	flag.IntVar(&rateLimitBurst, "rate-limit-burst", defaultRateLimitBurst,
+		"Burst capacity for overall rate limit")
+	flag.DurationVar(&statusUpdateTimeout, "status-update-timeout", defaultStatusUpdateTimeout,
+		"Timeout for status update operations")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -243,6 +278,36 @@ func main() {
 	mgr.GetWebhookServer().Register("/mutate-v1-pod", &admission.Webhook{
 		Handler: interceptor,
 	})
+
+	statusTracker := tracker.NewStatusTracker(mgr.GetClient(), tracker.StatusTrackerConfig{
+		DebounceDuration:    debounceDuration,
+		RetryBaseDelay:      retryBaseDelay,
+		RetryMaxDelay:       retryMaxDelay,
+		RateLimitQPS:        rateLimitQPS,
+		RateLimitBurst:      rateLimitBurst,
+		StatusUpdateTimeout: statusUpdateTimeout,
+	})
+	defer statusTracker.Stop()
+
+	podReconciler := &controller.PodReconciler{
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Tracker: statusTracker,
+	}
+	if err := podReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create pod controller")
+		os.Exit(1)
+	}
+
+	mvReconciler := &controller.ModelValidationReconciler{
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Tracker: statusTracker,
+	}
+	if err := mvReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create ModelValidation controller")
+		os.Exit(1)
+	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

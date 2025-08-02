@@ -14,7 +14,23 @@ spec:
     singular: modelvalidation
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.authMethod
+      name: Auth Method
+      type: string
+    - jsonPath: .status.injectedPodCount
+      name: Injected Pods
+      type: integer
+    - jsonPath: .status.uninjectedPodCount
+      name: Uninjected Pods
+      type: integer
+    - jsonPath: .status.orphanedPodCount
+      name: Orphaned Pods
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: ModelValidation is the Schema for the modelvalidations API
@@ -89,6 +105,10 @@ spec:
           status:
             description: ModelValidationStatus defines the observed state of ModelValidation
             properties:
+              authMethod:
+                description: AuthMethod indicates which authentication method is being
+                  used
+                type: string
               conditions:
                 description: |-
                   INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
@@ -148,6 +168,98 @@ spec:
                   - type
                   type: object
                 type: array
+              injectedPodCount:
+                description: InjectedPodCount is the number of pods that have been
+                  injected with validation
+                format: int32
+                type: integer
+              injectedPods:
+                description: InjectedPods contains detailed information about injected
+                  pods
+                items:
+                  description: PodTrackingInfo contains information about a tracked
+                    pod
+                  properties:
+                    injectedAt:
+                      description: InjectedAt is when the pod was injected
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is the name of the pod
+                      type: string
+                    uid:
+                      description: UID is the unique identifier of the pod
+                      type: string
+                  required:
+                  - injectedAt
+                  - name
+                  - uid
+                  type: object
+                type: array
+              lastUpdated:
+                description: LastUpdated is the timestamp of the last status update
+                format: date-time
+                type: string
+              orphanedPodCount:
+                description: OrphanedPodCount is the number of injected pods that
+                  reference this CR but are inconsistent
+                format: int32
+                type: integer
+              orphanedPods:
+                description: OrphanedPods contains detailed information about pods
+                  that are injected but inconsistent
+                items:
+                  description: PodTrackingInfo contains information about a tracked
+                    pod
+                  properties:
+                    injectedAt:
+                      description: InjectedAt is when the pod was injected
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is the name of the pod
+                      type: string
+                    uid:
+                      description: UID is the unique identifier of the pod
+                      type: string
+                  required:
+                  - injectedAt
+                  - name
+                  - uid
+                  type: object
+                type: array
+              uninjectedPodCount:
+                description: UninjectedPodCount is the number of pods that have the
+                  label but were not injected
+                format: int32
+                type: integer
+              uninjectedPods:
+                description: UninjectedPods contains detailed information about pods
+                  that should have been injected but weren't
+                items:
+                  description: PodTrackingInfo contains information about a tracked
+                    pod
+                  properties:
+                    injectedAt:
+                      description: InjectedAt is when the pod was injected
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is the name of the pod
+                      type: string
+                    uid:
+                      description: UID is the unique identifier of the pod
+                      type: string
+                  required:
+                  - injectedAt
+                  - name
+                  - uid
+                  type: object
+                type: array
+            required:
+            - injectedPodCount
+            - orphanedPodCount
+            - uninjectedPodCount
             type: object
         type: object
     served: true

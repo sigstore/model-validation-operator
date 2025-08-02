@@ -99,6 +99,15 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd := exec.Command("kubectl", "delete", "pod", curlMetricsPodName, "-n", operatorNamespace)
 		_, _ = utils.Run(cmd)
 
+		By("cleaning up test resources before removing operator")
+		// Delete all pods first to trigger proper finalizer cleanup
+		cmd = exec.Command("kubectl", "delete", "pods", "--all", "-n", webhookTestNamespace, "--timeout=30s")
+		_, _ = utils.Run(cmd)
+
+		// Then delete ModelValidation CR
+		cmd = exec.Command("kubectl", "delete", "modelvalidations", "--all", "-n", webhookTestNamespace, "--timeout=30s")
+		_, _ = utils.Run(cmd)
+
 		By("undeploying the controller-manager")
 		cmd = exec.Command("make", "undeploy")
 		_, _ = utils.Run(cmd)

@@ -15,6 +15,11 @@
 // Package constants provides shared constants used throughout the model validation operator
 package constants
 
+const (
+	// ModelValidationInitContainerName is the name of the init container injected for model validation
+	ModelValidationInitContainerName = "model-validation"
+)
+
 var (
 	// ModelTransparencyCliImage is the default image for the model transparency CLI
 	// used as an init container to validate model signatures

@@ -19,10 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -43,7 +45,6 @@ func NewPodInterceptor(c client.Client, decoder admission.Decoder) webhook.Admis
 // +kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,failurePolicy=fail,groups="",resources=pods,sideEffects=None,verbs=create;update,versions=v1,name=pods.validation.ml.sigstore.dev,admissionReviewVersions=v1
 
 // +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations,verbs=get;list;watch
-// +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
 // podInterceptor extends pods with Model Validation Init-Container if annotation is specified.
@@ -69,7 +70,7 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 		logger.Error(err, "failed to get namespace")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
-	if ns.Labels[constants.IgnoreNamespaceLabel] == "true" {
+	if ns.Labels[constants.IgnoreNamespaceLabel] == constants.IgnoreNamespaceValue {
 		logger.Info("Namespace has ignore label, skipping", "namespace", req.Namespace)
 		return admission.Allowed("namespace ignored")
 	}
@@ -84,8 +85,8 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 
 	logger.Info("Search associated Model Validation CR", "pod", pod.Name, "namespace", pod.Namespace,
 		"modelValidationName", modelValidationName)
-	rhmv := &v1alpha1.ModelValidation{}
-	err := p.client.Get(ctx, client.ObjectKey{Name: modelValidationName, Namespace: pod.Namespace}, rhmv)
+	mv := &v1alpha1.ModelValidation{}
+	err := p.client.Get(ctx, client.ObjectKey{Name: modelValidationName, Namespace: pod.Namespace}, mv)
 	if err != nil {
 		msg := fmt.Sprintf("failed to get the ModelValidation CR %s/%s", pod.Namespace, modelValidationName)
 		logger.Error(err, msg)
@@ -99,10 +100,19 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 	}
 
 	args := []string{"verify"}
-	args = append(args, validationConfigToArgs(logger, rhmv.Spec.Config, rhmv.Spec.Model.SignaturePath)...)
-	args = append(args, rhmv.Spec.Model.Path)
+	args = append(args, validationConfigToArgs(logger, mv.Spec.Config, mv.Spec.Model.SignaturePath)...)
+	args = append(args, mv.Spec.Model.Path)
 
 	pp := pod.DeepCopy()
+
+	controllerutil.AddFinalizer(pp, constants.ModelValidationFinalizer)
+	if pp.Annotations == nil {
+		pp.Annotations = make(map[string]string)
+	}
+	pp.Annotations[constants.InjectedAnnotationKey] = time.Now().Format(time.RFC3339)
+	pp.Annotations[constants.AuthMethodAnnotationKey] = mv.GetAuthMethod()
+	pp.Annotations[constants.ConfigHashAnnotationKey] = mv.GetConfigHash()
+
 	vm := []corev1.VolumeMount{}
 	for _, c := range pod.Spec.Containers {
 		vm = append(vm, c.VolumeMounts...)

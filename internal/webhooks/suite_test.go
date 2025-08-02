@@ -23,8 +23,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
+	"github.com/sigstore/model-validation-operator/internal/tracker"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/test"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -44,11 +46,12 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client // You'll be using this client in your tests.
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg           *rest.Config
+	k8sClient     client.Client // You'll be using this client in your tests.
+	testEnv       *envtest.Environment
+	ctx           context.Context
+	cancel        context.CancelFunc
+	statusTracker tracker.StatusTracker
 )
 
 // findBinaryAssetsDirectory locates the kubernetes binaries directory
@@ -147,6 +150,14 @@ var _ = BeforeSuite(func() {
 
 	// Create a decoder for your webhook
 	decoder := admission.NewDecoder(scheme.Scheme)
+	statusTracker = tracker.NewStatusTracker(mgr.GetClient(), tracker.StatusTrackerConfig{
+		DebounceDuration:    50 * time.Millisecond, // Faster for tests
+		RetryBaseDelay:      10 * time.Millisecond, // Faster retries for tests
+		RetryMaxDelay:       1 * time.Second,       // Lower max delay for tests
+		RateLimitQPS:        100,                   // Higher QPS for tests
+		RateLimitBurst:      1000,                  // Higher burst for tests
+		StatusUpdateTimeout: 5 * time.Second,       // Shorter timeout for tests
+	})
 	podWebhookHandler := NewPodInterceptor(mgr.GetClient(), decoder)
 	mgr.GetWebhookServer().Register("/mutate-v1-pod", &admission.Webhook{
 		Handler: podWebhookHandler,
@@ -157,11 +168,22 @@ var _ = BeforeSuite(func() {
 		err = mgr.Start(ctx)
 		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
 	}()
+
+	// Wait for webhook server to be ready by checking if it's serving
+	Eventually(func() error {
+		return mgr.GetWebhookServer().StartedChecker()(nil)
+	}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 })
 
 var _ = AfterSuite(func() {
-	cancel()
 	By("tearing down the test environment")
+
+	statusTracker.Stop()
+	cancel()
+
+	// Give manager time to shutdown gracefully
+	time.Sleep(100 * time.Millisecond)
+
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
