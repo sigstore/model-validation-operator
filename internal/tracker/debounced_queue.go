@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -53,6 +54,8 @@ type DebouncedQueueImpl struct {
 	debounceWg     sync.WaitGroup
 	mu             sync.Mutex
 	stopCh         chan struct{}
+	// Protects metric updates to ensure consistency with queue state
+	metricMu sync.Mutex
 }
 
 // DebouncedQueueConfig holds configuration for the debounced queue
@@ -84,6 +87,20 @@ func NewDebouncedQueue(config DebouncedQueueConfig) DebouncedQueue {
 	}
 }
 
+// updateQueueSizeMetric updates the queue size metric
+// Uses a mutex to ensure metric consistency with queue state
+func (dq *DebouncedQueueImpl) updateQueueSizeMetric() {
+	dq.metricMu.Lock()
+	defer dq.metricMu.Unlock()
+
+	// Skip metric updates if shutdown has been initiated
+	if dq.isShutDown() {
+		return
+	}
+
+	metrics.SetQueueSize(float64(dq.queue.Len()))
+}
+
 // isShutDown checks if the queue has been shut down (non-blocking)
 func (dq *DebouncedQueueImpl) isShutDown() bool {
 	select {
@@ -112,6 +129,7 @@ func (dq *DebouncedQueueImpl) Add(item types.NamespacedName) {
 				return
 			}
 			dq.queue.Add(item)
+			dq.updateQueueSizeMetric()
 			dq.mu.Lock()
 			delete(dq.debounceTimers, item)
 			dq.mu.Unlock()
@@ -127,6 +145,7 @@ func (dq *DebouncedQueueImpl) Get() (types.NamespacedName, bool) {
 // Done marks an item as done processing
 func (dq *DebouncedQueueImpl) Done(item types.NamespacedName) {
 	dq.queue.Done(item)
+	dq.updateQueueSizeMetric()
 }
 
 // AddWithRetry adds an item to the queue with rate limiting for retries
@@ -136,6 +155,7 @@ func (dq *DebouncedQueueImpl) AddWithRetry(item types.NamespacedName) {
 		return
 	}
 	dq.queue.AddRateLimited(item)
+	dq.updateQueueSizeMetric()
 }
 
 // ForgetRetries forgets retry tracking for an item
@@ -193,4 +213,7 @@ func (dq *DebouncedQueueImpl) ShutDown() {
 	}
 
 	dq.queue.ShutDown()
+
+	// Update metrics to reflect shutdown
+	metrics.SetQueueSize(0)
 }

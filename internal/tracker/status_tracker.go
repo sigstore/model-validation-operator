@@ -11,6 +11,7 @@ import (
 
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
 	"github.com/sigstore/model-validation-operator/internal/constants"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,6 +146,7 @@ func (st *StatusTrackerImpl) processNextUpdate() {
 			"modelvalidation", mvKey,
 			"attempts", st.debouncedQueue.GetRetryCount(mvKey)+1,
 			"error", err)
+		metrics.RecordRetryAttempt(mvKey.Namespace, mvKey.Name)
 		st.debouncedQueue.AddWithRetry(mvKey)
 	} else {
 		st.debouncedQueue.ForgetRetries(mvKey)
@@ -161,6 +163,7 @@ func (st *StatusTrackerImpl) WaitForUpdates() {
 // This is called asynchronously from the update worker
 func (st *StatusTrackerImpl) doUpdateStatus(ctx context.Context, mvKey types.NamespacedName) error {
 	logger := log.FromContext(ctx)
+	startTime := time.Now()
 
 	mv := &v1alpha1.ModelValidation{}
 	if err := st.client.Get(ctx, mvKey, mv); err != nil {
@@ -168,8 +171,10 @@ func (st *StatusTrackerImpl) doUpdateStatus(ctx context.Context, mvKey types.Nam
 			st.mu.Lock()
 			delete(st.modelValidations, mvKey)
 			st.mu.Unlock()
+			recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateFailure, time.Since(startTime))
 			return nil
 		}
+		recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateFailure, time.Since(startTime))
 		return err
 	}
 
@@ -213,6 +218,15 @@ func (st *StatusTrackerImpl) doUpdateStatus(ctx context.Context, mvKey types.Nam
 			"newConfigHash", currentConfigHash,
 			"oldAuthMethod", trackedAuthMethod,
 			"newAuthMethod", currentAuthMethod)
+
+		if trackedConfigHash != currentConfigHash {
+			metrics.RecordConfigurationDrift(mvKey.Namespace, mvKey.Name, "config_hash")
+		}
+		if trackedAuthMethod != currentAuthMethod {
+			metrics.RecordConfigurationDrift(mvKey.Namespace, mvKey.Name, "auth_method")
+		}
+
+		recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateFailure, time.Since(startTime))
 		return fmt.Errorf(
 			"configuration drift detected for ModelValidation %s: hash changed from %s to %s, auth method changed from %s to %s",
 			mvKey, trackedConfigHash, currentConfigHash, trackedAuthMethod, currentAuthMethod)
@@ -232,14 +246,20 @@ func (st *StatusTrackerImpl) doUpdateStatus(ctx context.Context, mvKey types.Nam
 
 	if statusEqual(mv.Status, newStatus) {
 		logger.V(2).Info("Status unchanged, skipping update", "modelvalidation", mvKey)
+		recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateSuccess, time.Since(startTime))
 		return nil
 	}
 
 	mv.Status = newStatus
 	if err := st.client.Status().Update(ctx, mv); err != nil {
 		logger.Error(err, "Failed to update ModelValidation status", "modelvalidation", mvKey)
+		recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateFailure, time.Since(startTime))
 		return err
 	}
+
+	recordStatusUpdateResult(mvKey.Namespace, mvKey.Name, metrics.StatusUpdateSuccess, time.Since(startTime))
+
+	recordPodCounts(mvKey.Namespace, mvKey.Name, len(trackedPods), len(uninjectedPods), len(orphanedPods))
 
 	logger.Info("Updated ModelValidation status",
 		"modelvalidation", mvKey,
@@ -256,6 +276,19 @@ func comparePodSlices(a, b []v1alpha1.PodTrackingInfo) bool {
 	return slices.EqualFunc(a, b, func(x, y v1alpha1.PodTrackingInfo) bool {
 		return x.Name == y.Name && x.UID == y.UID
 	})
+}
+
+// recordStatusUpdateResult records both the status update result and duration metrics
+func recordStatusUpdateResult(namespace, modelValidation, result string, duration time.Duration) {
+	metrics.RecordStatusUpdate(namespace, modelValidation, result)
+	metrics.RecordStatusUpdateDuration(namespace, modelValidation, result, duration.Seconds())
+}
+
+// recordPodCounts records current pod counts for all states
+func recordPodCounts(namespace, modelValidation string, injected, uninjected, orphaned int) {
+	metrics.RecordPodCount(namespace, modelValidation, metrics.PodStateInjected, float64(injected))
+	metrics.RecordPodCount(namespace, modelValidation, metrics.PodStateUninjected, float64(uninjected))
+	metrics.RecordPodCount(namespace, modelValidation, metrics.PodStateOrphaned, float64(orphaned))
 }
 
 // statusEqual compares two ModelValidationStatus objects for equality
@@ -280,9 +313,11 @@ func (st *StatusTrackerImpl) AddModelValidation(ctx context.Context, mv *v1alpha
 	st.mu.Lock()
 	mvi, alreadyTracking := st.modelValidations[mvKey]
 	if !alreadyTracking {
-		mvInfo := NewModelValidationInfo(mv.GetConfigHash(), mv.GetAuthMethod(), mv.Generation)
+		mvInfo := NewModelValidationInfo(mv.Name, mv.GetConfigHash(), mv.GetAuthMethod(), mv.Generation)
 		st.modelValidations[mvKey] = mvInfo
 		st.mvNamespaces[mvKey.Namespace]++
+
+		metrics.RecordModelValidationCR(mvKey.Namespace, float64(st.mvNamespaces[mvKey.Namespace]))
 	} else if mv.Generation != mvi.ObservedGeneration {
 		// Update existing tracking with current config and handle drift
 		driftedPods := st.modelValidations[mvKey].UpdateConfig(mv.GetConfigHash(), mv.GetAuthMethod(), mv.Generation)
@@ -291,6 +326,9 @@ func (st *StatusTrackerImpl) AddModelValidation(ctx context.Context, mv *v1alpha
 			logger := log.FromContext(ctx)
 			logger.Info("Detected configuration drift, moved pods to orphaned status",
 				"modelvalidation", mvKey, "driftedPods", len(driftedPods))
+
+			metrics.RecordMultiplePodStateTransitions(mvKey.Namespace, mvKey.Name,
+				metrics.PodStateInjected, metrics.PodStateOrphaned, len(driftedPods))
 		}
 	}
 	st.mu.Unlock()
@@ -320,14 +358,24 @@ func (st *StatusTrackerImpl) RemoveModelValidation(mvKey types.NamespacedName) {
 	if wasTracked {
 		delete(st.modelValidations, mvKey)
 		st.mvNamespaces[mvKey.Namespace]--
+
 		if st.mvNamespaces[mvKey.Namespace] <= 0 {
 			delete(st.mvNamespaces, mvKey.Namespace)
+			metrics.RecordModelValidationCR(mvKey.Namespace, 0)
+		} else {
+			metrics.RecordModelValidationCR(mvKey.Namespace, float64(st.mvNamespaces[mvKey.Namespace]))
 		}
+
 		allPods := mvInfo.GetAllPods()
 		var podsToCleanup []types.NamespacedName
 		collectPodsForCleanup(allPods, &podsToCleanup)
 
 		st.podMapping.RemovePodsByName(podsToCleanup...)
+
+		// Reset pod count metrics for removed ModelValidation
+		metrics.RecordPodCount(mvKey.Namespace, mvKey.Name, metrics.PodStateInjected, 0)
+		metrics.RecordPodCount(mvKey.Namespace, mvKey.Name, metrics.PodStateUninjected, 0)
+		metrics.RecordPodCount(mvKey.Namespace, mvKey.Name, metrics.PodStateOrphaned, 0)
 	}
 }
 

@@ -2,6 +2,7 @@
 package tracker
 
 import (
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -18,6 +19,8 @@ type PodInfo struct {
 
 // ModelValidationInfo consolidates all tracking information for a ModelValidation resource
 type ModelValidationInfo struct {
+	// Name of the ModelValidation CR
+	Name string
 	// Current configuration hash for drift detection
 	ConfigHash string
 	// Current authentication method
@@ -33,8 +36,9 @@ type ModelValidationInfo struct {
 }
 
 // NewModelValidationInfo creates a new ModelValidationInfo with initialized maps
-func NewModelValidationInfo(configHash, authMethod string, observedGeneration int64) *ModelValidationInfo {
+func NewModelValidationInfo(name, configHash, authMethod string, observedGeneration int64) *ModelValidationInfo {
 	return &ModelValidationInfo{
+		Name:               name,
 		ConfigHash:         configHash,
 		AuthMethod:         authMethod,
 		ObservedGeneration: observedGeneration,
@@ -44,25 +48,48 @@ func NewModelValidationInfo(configHash, authMethod string, observedGeneration in
 	}
 }
 
-// AddInjectedPod adds a pod with finalizer, automatically determining if it's injected or orphaned
-func (mvi *ModelValidationInfo) AddInjectedPod(podInfo *PodInfo) {
+// getPodState returns the current state of a pod, or empty string if not found
+func (mvi *ModelValidationInfo) getPodState(podUID types.UID) string {
+	if _, exists := mvi.InjectedPods[podUID]; exists {
+		return metrics.PodStateInjected
+	}
+	if _, exists := mvi.OrphanedPods[podUID]; exists {
+		return metrics.PodStateOrphaned
+	}
+	if _, exists := mvi.UninjectedPods[podUID]; exists {
+		return metrics.PodStateUninjected
+	}
+	return ""
+}
+
+// movePodToState removes pod from current state, assigns to new state, and records transition
+func (mvi *ModelValidationInfo) movePodToState(podInfo *PodInfo, newState string, targetMap map[types.UID]*PodInfo) {
+	prevState := mvi.getPodState(podInfo.UID)
 	mvi.RemovePod(podInfo.UID)
 
+	targetMap[podInfo.UID] = podInfo
+
+	if prevState != "" && prevState != newState {
+		metrics.RecordPodStateTransition(podInfo.Namespace, mvi.Name, prevState, newState)
+	}
+}
+
+// AddInjectedPod adds a pod with finalizer, automatically determining if it's injected or orphaned
+func (mvi *ModelValidationInfo) AddInjectedPod(podInfo *PodInfo) {
 	// Determine if pod is orphaned based on configuration drift
 	isOrphaned := (podInfo.ConfigHash != "" && podInfo.ConfigHash != mvi.ConfigHash) ||
 		(podInfo.AuthMethod != "" && podInfo.AuthMethod != mvi.AuthMethod)
 
 	if isOrphaned {
-		mvi.OrphanedPods[podInfo.UID] = podInfo
+		mvi.movePodToState(podInfo, metrics.PodStateOrphaned, mvi.OrphanedPods)
 	} else {
-		mvi.InjectedPods[podInfo.UID] = podInfo
+		mvi.movePodToState(podInfo, metrics.PodStateInjected, mvi.InjectedPods)
 	}
 }
 
 // AddUninjectedPod adds a pod to the uninjected category
 func (mvi *ModelValidationInfo) AddUninjectedPod(podInfo *PodInfo) {
-	mvi.RemovePod(podInfo.UID)
-	mvi.UninjectedPods[podInfo.UID] = podInfo
+	mvi.movePodToState(podInfo, metrics.PodStateUninjected, mvi.UninjectedPods)
 }
 
 // RemovePod removes a pod from all categories
