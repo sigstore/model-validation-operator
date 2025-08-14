@@ -23,6 +23,11 @@ linters:
     - unconvert
     - unparam
     - unused
+  exclusions:
+    rules:
+      - linters:
+          - lll
+        source: "^// \\+kubebuilder:validation"
 
 formatters:
   enable:

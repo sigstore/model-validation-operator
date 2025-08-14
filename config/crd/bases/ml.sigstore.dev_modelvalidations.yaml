@@ -11,6 +11,8 @@ spec:
     kind: ModelValidation
     listKind: ModelValidationList
     plural: modelvalidations
+    shortNames:
+    - mv
     singular: modelvalidation
   scope: Namespaced
   versions:
@@ -30,10 +32,16 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .spec.model.path
+      name: Model Path
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ModelValidation is the Schema for the modelvalidations API
+        description: ModelValidation is the Schema for the modelvalidations API.
         properties:
           apiVersion:
             description: |-
@@ -56,7 +64,9 @@ spec:
             description: ModelValidationSpec defines the desired state of ModelValidation
             properties:
               config:
-                description: Configuration for validation methods.
+                description: |-
+                  Configuration for validation methods.
+                  Exactly one validation method must be specified.
                 properties:
                   clientTrustConfig:
                     description: ClientTrustConfig is the configuration for client
@@ -72,40 +82,66 @@ spec:
                     - trustConfigPath
                     type: object
                   pkiConfig:
-                    description: |-
-                      PkiConfig defines the PKI-based verification configuration
-                      using a certificate authority for validating model signatures
+                    description: PkiConfig is the configuration for traditional PKI-based
+                      signature verification.
                     properties:
                       certificateAuthority:
-                        description: Path to the certificate authority for PKI.
+                        description: |-
+                          CertificateAuthorityPath is the path to the trusted certificate authority (CA) file.
+                          The signature's chain of trust will be verified against this CA.
                         type: string
+                    required:
+                    - certificateAuthority
                     type: object
                   publicKeyConfig:
-                    description: |-
-                      PublicKeyConfig defines the public key verification configuration
-                      for validating model signatures using a local public key
+                    description: PublicKeyConfig is the configuration for public key-based
+                      signature verification.
                     properties:
                       keyPath:
-                        description: Path to the public key.
+                        description: |-
+                          KeyPath is the file path to the public key used for signature verification.
+                          This should be the public key corresponding to the private key used for signing.
                         type: string
+                    required:
+                    - keyPath
                     type: object
                   sigstoreConfig:
-                    description: |-
-                      SigstoreConfig defines the Sigstore verification configuration
-                      for validating model signatures using certificate identity and OIDC issuer
+                    description: SigstoreConfig is the configuration for Sigstore-based
+                      signature verification.
                     properties:
                       certificateIdentity:
+                        description: |-
+                          CertificateIdentity is the expected identity of the signing certificate.
+                          For example, "email:jane.doe@example.com".
                         type: string
                       certificateOidcIssuer:
+                        description: |-
+                          CertificateOidcIssuer is the URL of the OIDC issuer that issued the signing certificate.
+                          For example, "https://accounts.google.com".
                         type: string
+                    required:
+                    - certificateIdentity
+                    - certificateOidcIssuer
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: exactly one validation method must be specified
+                  rule: '[has(self.sigstoreConfig), has(self.pkiConfig), has(self.publicKeyConfig)].filter(x,
+                    x).size() == 1'
               model:
                 description: Model details.
                 properties:
                   path:
+                    description: |-
+                      Path to the model artifact. This could be a file path on a shared volume
+                      or a URI to an object store.
+                    pattern: ^(/|s3://|gs://|https?://)
                     type: string
                   signaturePath:
+                    description: |-
+                      SignaturePath is the path to the cryptographic signature bundle for the model.
+                      This is used by the various validation methods to verify the model's integrity.
+                    pattern: ^(/|s3://|gs://|https?://)
                     type: string
                 required:
                 - path
@@ -123,9 +159,6 @@ spec:
                   used
                 type: string
               conditions:
-                description: |-
-                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-                  Important: Run "make" to regenerate code after modifying this file
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

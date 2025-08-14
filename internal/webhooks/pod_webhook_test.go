@@ -58,6 +58,8 @@ var _ = Describe("Pod webhook", func() {
 				ConfigType:     "sigstore",
 				CertIdentity:   "test@example.com",
 				CertOidcIssuer: "https://accounts.google.com",
+				ModelPath:      "/path/to/model.onnx",
+				SignaturePath:  "/path/to/model.onnx.sig",
 			})
 			err = k8sClient.Create(ctx, mv)
 			Expect(err).To(Not(HaveOccurred()))

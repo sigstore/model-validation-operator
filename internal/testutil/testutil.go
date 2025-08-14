@@ -31,6 +31,8 @@ type TestModelValidationOptions struct {
 	CertificateCA     string
 	CertIdentity      string
 	CertOidcIssuer    string
+	ModelPath         string
+	SignaturePath     string
 	TrustConfigPath   string
 }
 
@@ -56,6 +58,12 @@ func CreateTestModelValidation(opts TestModelValidationOptions) *v1alpha1.ModelV
 	if opts.ConfigType == "" {
 		opts.ConfigType = "sigstore"
 	}
+	if opts.ModelPath == "" {
+		opts.ModelPath = "/test-model"
+	}
+	if opts.SignaturePath == "" {
+		opts.SignaturePath = "/test-signature"
+	}
 
 	mv := &v1alpha1.ModelValidation{
 		ObjectMeta: metav1.ObjectMeta{
@@ -66,8 +74,8 @@ func CreateTestModelValidation(opts TestModelValidationOptions) *v1alpha1.ModelV
 		},
 		Spec: v1alpha1.ModelValidationSpec{
 			Model: v1alpha1.Model{
-				Path:          "test-model",
-				SignaturePath: "test-signature",
+				Path:          opts.ModelPath,
+				SignaturePath: opts.SignaturePath,
 			},
 		},
 	}
