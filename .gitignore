@@ -15,3 +15,10 @@ cover.out
 manifests/*.yaml
 # Don't include generated bundles (will be built in CI/CD at some point)
 bundle/
+
+# Generated test keys
+testdata/docker/test_*.pub
+testdata/docker/test_*.priv
+
+# Generated model signature
+testdata/tensorflow_saved_model/model.sig

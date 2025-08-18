@@ -31,6 +31,9 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # ghcr.io/sigstore/model-validation-operator-bundle:$VERSION and ghcr.io/sigstore/model-validation-operator-catalog:$VERSION.
 IMAGE_TAG_BASE ?= ghcr.io/sigstore/model-validation-operator
 
+# IMG defines the image:tag used for the operator.
+IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
+
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
@@ -52,8 +55,6 @@ endif
 # Set the Operator SDK version to use. By default, what is installed on the system is used.
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.41.1
-# Image URL to use all building/pushing image targets
-IMG ?= controller:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -117,14 +118,6 @@ vet: ## Run go vet against code.
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
-
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-.PHONY: test-e2e
-test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	go test ./test/e2e/ -v -ginkgo.v
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -419,3 +412,158 @@ generate-manifests: manifests ## Generate manifests for all environments using g
 		echo "Generating manifests for $$env environment..."; \
 		./scripts/generate-manifests.sh $$env manifests; \
 	done
+
+##@ E2E Test Infrastructure
+
+# E2E Test Variables
+E2E_OPERATOR_NAMESPACE ?= model-validation-operator-system
+E2E_TEST_NAMESPACE ?= e2e-webhook-test-ns
+E2E_TEST_MODEL ?= model-validation-test-model:latest
+MODEL_TRANSPARENCY_IMG ?= ghcr.io/sigstore/model-transparency-cli:v1.0.1
+CERTMANAGER_VERSION ?= v1.18.2
+CERT_MANAGER_YAML ?= https://github.com/cert-manager/cert-manager/releases/download/$(CERTMANAGER_VERSION)/cert-manager.yaml
+KIND_CLUSTER ?= kind
+
+# Build and sign test model
+.PHONY: e2e-generate-test-keys
+e2e-generate-test-keys:
+	@echo "Generating ECDSA P-256 test keys for model signing..."
+	@if [ ! -f testdata/docker/test_private_key.priv ]; then \
+		echo "Generating private key..."; \
+		openssl ecparam -name prime256v1 -genkey -noout -out testdata/docker/test_private_key.priv; \
+	fi
+	@if [ ! -f testdata/docker/test_public_key.pub ]; then \
+		echo "Generating public key..."; \
+		openssl ec -in testdata/docker/test_private_key.priv -pubout -out testdata/docker/test_public_key.pub; \
+	fi
+	@if [ ! -f testdata/docker/test_invalid_private_key.priv ]; then \
+		echo "Generating invalid private key for failure tests..."; \
+		openssl ecparam -name prime256v1 -genkey -noout -out testdata/docker/test_invalid_private_key.priv; \
+	fi
+	@if [ ! -f testdata/docker/test_invalid_public_key.pub ]; then \
+		echo "Generating invalid public key for failure tests..."; \
+		openssl ec -in testdata/docker/test_invalid_private_key.priv -pubout -out testdata/docker/test_invalid_public_key.pub; \
+	fi
+
+.PHONY: e2e-sign-test-model
+e2e-sign-test-model: e2e-generate-test-keys
+	@echo "Signing test model with private key..."
+	@# Remove public key from model directory before signing to avoid including it in signature
+	@rm -f testdata/tensorflow_saved_model/test_public_key.pub
+	$(CONTAINER_TOOL) run --rm \
+		-v $(PWD)/testdata/tensorflow_saved_model:/model \
+		-v $(PWD)/testdata/docker/test_private_key.priv:/test_private_key.priv \
+		--entrypoint="" \
+		ghcr.io/sigstore/model-transparency-cli:v1.0.1 \
+		/usr/local/bin/model_signing sign key /model \
+		--private_key /test_private_key.priv \
+		--signature /model/model.sig
+
+.PHONY: e2e-build-test-model
+e2e-build-test-model: e2e-sign-test-model
+	@echo "Building test model image..."
+	cd testdata && $(CONTAINER_TOOL) build --no-cache -t $(E2E_TEST_MODEL) -f docker/test-model.Dockerfile .
+
+# install and uninstall cert-manager for tests
+
+.PHONY: e2e-install-certmanager
+e2e-install-certmanager:
+	@echo "Installing cert-manager..."
+	$(KUBECTL) apply -f $(CERT_MANAGER_YAML)
+	@echo "Waiting for cert-manager to be ready..."
+	$(KUBECTL) wait --for=condition=Available deployment -n cert-manager --all --timeout=120s
+
+.PHONY: e2e-uninstall-certmanager
+e2e-uninstall-certmanager: ## Uninstall cert-manager
+	@echo "Uninstalling cert-manager..."
+	-$(KUBECTL) delete -f $(CERT_MANAGER_YAML)
+
+# Load test images into the kind cluster
+
+.PHONY: e2e-build-image
+e2e-build-image:
+	$(CONTAINER_TOOL) build -t $(IMG) -f $(CONTAINER_FILE) .
+
+.PHONY: e2e-load-images
+e2e-load-images: e2e-build-image e2e-build-test-model
+	@echo "Pulling model-transparency-cli image..."
+	$(CONTAINER_TOOL) pull $(MODEL_TRANSPARENCY_IMG)
+	@echo "Loading manager image into Kind cluster..."
+	$(KIND) load docker-image -n $(KIND_CLUSTER) $(IMG)
+	@echo "Loading model-transparency-cli image into Kind cluster..."  
+	$(KIND) load docker-image -n $(KIND_CLUSTER) $(MODEL_TRANSPARENCY_IMG)
+	@echo "Loading test model image into Kind cluster..."
+	$(KIND) load docker-image -n $(KIND_CLUSTER) $(E2E_TEST_MODEL)
+
+# Setup test environment (namespaces, local models on kind cluster, operator)
+
+.PHONY: e2e-setup-namespaces
+e2e-setup-namespaces:
+	@echo "Creating operator namespace..."
+	$(KUBECTL) create ns $(E2E_OPERATOR_NAMESPACE) || true
+	@echo "Labeling operator namespace with restricted security policy..."
+	$(KUBECTL) label --overwrite ns $(E2E_OPERATOR_NAMESPACE) pod-security.kubernetes.io/enforce=restricted
+	@echo "Labeling operator namespace to be ignored by webhook..."
+	$(KUBECTL) label --overwrite ns $(E2E_OPERATOR_NAMESPACE) validation.ml.sigstore.dev/ignore=true
+	@echo "Creating test namespace..."
+	$(KUBECTL) create ns $(E2E_TEST_NAMESPACE) || true
+
+.PHONY: e2e-setup-model-data
+e2e-setup-model-data: e2e-load-images e2e-setup-namespaces
+	@echo "Cleaning up any existing model data DaemonSet..."
+	-$(KUBECTL) delete daemonset model-data-setup -n $(E2E_TEST_NAMESPACE) 2>/dev/null || true
+	@echo "Waiting for cleanup to complete..."
+	@sleep 5
+	@echo "Deploying model data setup DaemonSet..."
+	$(KUBECTL) apply -f test/e2e/testdata/model-data-daemonset.yaml
+	@echo "Waiting for model data to be available on all nodes..."
+	$(KUBECTL) rollout status daemonset/model-data-setup -n $(E2E_TEST_NAMESPACE) --timeout=120s
+
+.PHONY: e2e-deploy-operator
+e2e-deploy-operator: e2e-setup-namespaces deploy
+	@echo "E2E operator deployment complete"
+
+.PHONY: e2e-wait-operator
+e2e-wait-operator: ## Wait for operator pod to be ready
+	@echo "Waiting for controller pod to be ready..."
+	$(KUBECTL) wait --for=condition=Ready pod -l control-plane=controller-manager -n $(E2E_OPERATOR_NAMESPACE) --timeout=120s
+
+# test environment setup and teardown - certmanager, operator and test model for testing
+
+.PHONY: e2e-setup
+e2e-setup: e2e-install-certmanager e2e-setup-model-data e2e-deploy-operator e2e-wait-operator ## Complete e2e test setup
+	@echo "E2E test environment setup complete"
+
+.PHONY: e2e-cleanup-resources
+e2e-cleanup-resources: ## Clean up test resources before removing operator
+	@echo "Cleaning up test resources..."
+	-$(KUBECTL) delete pods --all -n $(E2E_TEST_NAMESPACE) --timeout=30s
+	-$(KUBECTL) delete modelvalidations --all -n $(E2E_TEST_NAMESPACE) --timeout=30s
+	-$(KUBECTL) delete daemonset model-data-setup -n $(E2E_TEST_NAMESPACE) --timeout=30s
+
+.PHONY: e2e-teardown
+e2e-teardown: e2e-cleanup-resources undeploy e2e-uninstall-certmanager
+	@echo "Tearing down e2e test environment..."
+	-$(KUBECTL) delete ns $(E2E_OPERATOR_NAMESPACE) --timeout=60s
+	-$(KUBECTL) delete ns $(E2E_TEST_NAMESPACE) --timeout=60s
+
+# run e2e tests
+
+.PHONY: test-e2e
+test-e2e: manifests generate fmt vet ## Run the e2e tests, no setup and teardown.  Expects the operator to be deployed.
+	@echo "Running e2e tests (assumes infrastructure is already set up)..."
+	go test ./test/e2e/ -v -ginkgo.v
+
+.PHONY: test-e2e-full
+test-e2e-full: manifests generate fmt vet e2e-setup ## Run e2e tests with setup and teardown
+	@echo "Running e2e tests with full infrastructure setup..."
+	go test ./test/e2e/ -v -ginkgo.v; \
+	TEST_RESULT=$$?; \
+	$(MAKE) e2e-teardown; \
+	exit $$TEST_RESULT
+
+.PHONY: test-e2e-ci
+test-e2e-ci: manifests generate fmt vet e2e-setup ## Run the e2e tests, with setup.  No teardown as the CI workflow will throw away kind
+	@echo "Running e2e tests with infrastructure setup for CI..."
+	go test ./test/e2e/ -v -ginkgo.v
+

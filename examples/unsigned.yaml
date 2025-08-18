@@ -7,7 +7,7 @@ spec:
   config:
     # pkiConfig:
     #   certificateAuthority: /path/to/ca.crt
-    privateKeyConfig:
+    publicKeyConfig:
       keyPath: /root/pub.key
     # sigstoreConfig:
     #   certificateIdentity: "https://sigstore.example.com/certificate"

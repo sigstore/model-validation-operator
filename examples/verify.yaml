@@ -9,7 +9,7 @@ spec:
   config:
     # pkiConfig:
     #   certificateAuthority: /path/to/ca.crt
-    # privateKeyConfig:
+    # publicKeyConfig:
     #   keyPath: /root/pub.key
     sigstoreConfig:
       certificateIdentity: "https://github.com/sigstore/model-validation-operator/.github/workflows/sign-model.yaml@refs/tags/v0.0.2"

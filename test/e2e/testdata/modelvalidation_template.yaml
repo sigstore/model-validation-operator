@@ -1,0 +1,12 @@
+apiVersion: ml.sigstore.dev/v1alpha1
+kind: ModelValidation
+metadata:
+  name: {{.ModelName}}
+  namespace: {{.Namespace}}
+spec:
+  config:
+    publicKeyConfig:
+      keyPath: {{if .KeyPath}}{{.KeyPath}}{{else}}/keys/test_public_key.pub{{end}}
+  model:
+    path: /data
+    signaturePath: /data/model.sig

@@ -44,19 +44,19 @@ type PkiConfig struct {
 	CertificateAuthority string `json:"certificateAuthority,omitempty"`
 }
 
-// PrivateKeyConfig defines the private key verification configuration
-// for validating model signatures using a local private key
-type PrivateKeyConfig struct {
-	// Path to the private key.
+// PublicKeyConfig defines the public key verification configuration
+// for validating model signatures using a local public key
+type PublicKeyConfig struct {
+	// Path to the public key.
 	KeyPath string `json:"keyPath,omitempty"`
 }
 
 // ValidationConfig defines the various methods available for validating model signatures.
 // At least one validation method must be specified.
 type ValidationConfig struct {
-	SigstoreConfig   *SigstoreConfig   `json:"sigstoreConfig,omitempty"`
-	PkiConfig        *PkiConfig        `json:"pkiConfig,omitempty"`
-	PrivateKeyConfig *PrivateKeyConfig `json:"privateKeyConfig,omitempty"`
+	SigstoreConfig  *SigstoreConfig  `json:"sigstoreConfig,omitempty"`
+	PkiConfig       *PkiConfig       `json:"pkiConfig,omitempty"`
+	PublicKeyConfig *PublicKeyConfig `json:"publicKeyConfig,omitempty"`
 }
 
 // ModelValidationSpec defines the desired state of ModelValidation
@@ -143,8 +143,8 @@ func (mv *ModelValidation) GetAuthMethod() string {
 		return "sigstore"
 	} else if mv.Spec.Config.PkiConfig != nil {
 		return "pki"
-	} else if mv.Spec.Config.PrivateKeyConfig != nil {
-		return "private-key"
+	} else if mv.Spec.Config.PublicKeyConfig != nil {
+		return "public-key"
 	}
 	return "unknown"
 }
@@ -165,9 +165,9 @@ func (vc *ValidationConfig) GetConfigHash() string {
 	} else if vc.PkiConfig != nil {
 		hasher.Write([]byte("pki"))
 		hasher.Write([]byte(vc.PkiConfig.CertificateAuthority))
-	} else if vc.PrivateKeyConfig != nil {
-		hasher.Write([]byte("privatekey"))
-		hasher.Write([]byte(vc.PrivateKeyConfig.KeyPath))
+	} else if vc.PublicKeyConfig != nil {
+		hasher.Write([]byte("publickey"))
+		hasher.Write([]byte(vc.PublicKeyConfig.KeyPath))
 	}
 
 	return fmt.Sprintf("%x", hasher.Sum(nil))[:16] // Use first 16 chars for brevity
