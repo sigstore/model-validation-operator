@@ -116,7 +116,7 @@ var _ = Describe("PodReconciler", func() {
 			Expect(removeEvents).To(HaveLen(1))
 			Expect(removeEvents[0]).To(Equal(pod.UID))
 
-			Eventually(func() []string {
+			Eventually(ctx, func(ctx context.Context) []string {
 				updatedPod := &corev1.Pod{}
 				err := fakeClient.Get(ctx, req.NamespacedName, updatedPod)
 				if err != nil {

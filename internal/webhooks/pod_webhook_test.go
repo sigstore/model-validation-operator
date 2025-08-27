@@ -94,15 +94,15 @@ var _ = Describe("Pod webhook", func() {
 
 			By("Checking that validation sidecar was created")
 			found := &corev1.Pod{}
-			Eventually(func() error {
+			Eventually(ctx, func(ctx context.Context) error {
 				return k8sClient.Get(ctx, typeNamespaceName, found)
-			}).Should(Succeed())
+			}, 5*time.Second).Should(Succeed())
 
-			Eventually(
-				func(_ Gomega) []corev1.Container {
-					Expect(k8sClient.Get(ctx, typeNamespaceName, found)).To(Succeed())
+			Eventually(ctx,
+				func(g Gomega, ctx context.Context) []corev1.Container {
+					g.Expect(k8sClient.Get(ctx, typeNamespaceName, found)).To(Succeed())
 					return found.Spec.InitContainers
-				},
+				}, 5*time.Second,
 			).Should(And(
 				WithTransform(func(containers []corev1.Container) int { return len(containers) }, Equal(1)),
 				WithTransform(
@@ -126,17 +126,17 @@ var _ = Describe("Pod webhook", func() {
 
 			By("Waiting for pod to be injected")
 			found := &corev1.Pod{}
-			Eventually(func() []corev1.Container {
+			Eventually(ctx, func(ctx context.Context) []corev1.Container {
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: "tracked-pod", Namespace: Namespace}, found)
 				return found.Spec.InitContainers
-			}).Should(HaveLen(1))
+			}, 5*time.Second).Should(HaveLen(1))
 
 			err = statusTracker.ProcessPodEvent(ctx, found)
 			Expect(err).To(Not(HaveOccurred()))
 
 			By("Checking ModelValidation status was updated")
 			mv := &v1alpha1.ModelValidation{}
-			Eventually(func() int32 {
+			Eventually(ctx, func(ctx context.Context) int32 {
 				_ = k8sClient.Get(ctx, typeNamespaceName, mv)
 				return mv.Status.InjectedPodCount
 			}, 5*time.Second).Should(BeNumerically(">", 0))

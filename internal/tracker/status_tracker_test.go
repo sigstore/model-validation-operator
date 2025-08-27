@@ -43,7 +43,7 @@ func expectPodCount(
 	mvKey types.NamespacedName,
 	injected, uninjected, orphaned int32,
 ) {
-	Eventually(func() bool {
+	Eventually(ctx, func(ctx context.Context) bool {
 		updatedMV := testutil.GetModelValidationFromClientExpected(ctx, fakeClient, mvKey)
 		return updatedMV.Status.InjectedPodCount == injected &&
 			updatedMV.Status.UninjectedPodCount == uninjected &&
