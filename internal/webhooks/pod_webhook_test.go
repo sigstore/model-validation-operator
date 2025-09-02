@@ -153,5 +153,72 @@ var _ = Describe("Pod webhook", func() {
 			}
 			Expect(foundTrackedPod).To(BeTrue(), "Pod should be tracked in status")
 		})
+
+		It("Should add trust_config argument when ClientTrustConfig is provided", func() {
+			trustConfigName := "trust-config-test"
+			trustConfigNamespace := fmt.Sprintf("trust-config-ns-%d", time.Now().UnixNano())
+
+			By("Creating the Namespace for trust config test")
+			trustConfigNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: trustConfigNamespace,
+				},
+			}
+			err := k8sClient.Create(ctx, trustConfigNs)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Create ModelValidation with ClientTrustConfig")
+			trustMv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:            trustConfigName,
+				Namespace:       trustConfigNamespace,
+				ConfigType:      "sigstore",
+				CertIdentity:    "trust@example.com",
+				CertOidcIssuer:  "https://accounts.google.com",
+				TrustConfigPath: "/path/to/trust-config.json",
+			})
+			err = k8sClient.Create(ctx, trustMv)
+			Expect(err).To(Not(HaveOccurred()))
+
+			statusTracker.AddModelValidation(ctx, trustMv)
+
+			By("create labeled pod with trust config")
+			trustPod := testutil.CreateTestPod(testutil.TestPodOptions{
+				Name:      "trust-config-pod",
+				Namespace: trustConfigNamespace,
+				Labels:    map[string]string{constants.ModelValidationLabel: trustConfigName},
+			})
+			err = k8sClient.Create(ctx, trustPod)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Checking that validation sidecar was created with trust config")
+			foundTrustPod := &corev1.Pod{}
+			Eventually(ctx, func(ctx context.Context) []corev1.Container {
+				_ = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "trust-config-pod",
+					Namespace: trustConfigNamespace,
+				}, foundTrustPod)
+				return foundTrustPod.Spec.InitContainers
+			}, 5*time.Second).Should(HaveLen(1))
+
+			By("Verifying trust_config argument is present")
+			initContainer := foundTrustPod.Spec.InitContainers[0]
+			args := initContainer.Args
+			Expect(args).To(ContainElement("--trust_config"))
+
+			// Find the index of --trust_config and verify the next element is the path
+			trustConfigIndex := -1
+			for i, arg := range args {
+				if arg == "--trust_config" {
+					trustConfigIndex = i
+					break
+				}
+			}
+			Expect(trustConfigIndex).To(BeNumerically(">=", 0), "trust_config argument should be present")
+			Expect(trustConfigIndex+1).To(BeNumerically("<", len(args)), "trust_config should have a value")
+			Expect(args[trustConfigIndex+1]).To(Equal("/path/to/trust-config.json"))
+
+			By("Cleanup trust config namespace")
+			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: trustConfigNamespace}})
+		})
 	})
 })

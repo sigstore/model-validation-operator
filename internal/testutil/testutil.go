@@ -31,6 +31,7 @@ type TestModelValidationOptions struct {
 	CertificateCA     string
 	CertIdentity      string
 	CertOidcIssuer    string
+	TrustConfigPath   string
 }
 
 // TestPodOptions holds configuration for creating test Pod resources
@@ -99,6 +100,13 @@ func CreateTestModelValidation(opts TestModelValidationOptions) *v1alpha1.ModelV
 				CertificateIdentity:   certIdentity,
 				CertificateOidcIssuer: certOidcIssuer,
 			},
+		}
+	}
+
+	// Add ClientTrustConfig if trust config path is provided
+	if opts.TrustConfigPath != "" {
+		mv.Spec.Config.ClientTrustConfig = &v1alpha1.ClientTrustConfig{
+			TrustConfigPath: opts.TrustConfigPath,
 		}
 	}
 

@@ -144,28 +144,27 @@ func validationConfigToArgs(logger logr.Logger, cfg v1alpha1.ValidationConfig, s
 			"--identity", cfg.SigstoreConfig.CertificateIdentity,
 			"--identity_provider", cfg.SigstoreConfig.CertificateOidcIssuer,
 		)
-		return res
-	}
-
-	if cfg.PublicKeyConfig != nil {
+	} else if cfg.PublicKeyConfig != nil {
 		logger.Info("found public-key config")
 		res = append(res,
 			"key",
 			fmt.Sprintf("--signature=%s", signaturePath),
 			"--public_key", cfg.PublicKeyConfig.KeyPath,
 		)
-		return res
-	}
-
-	if cfg.PkiConfig != nil {
+	} else if cfg.PkiConfig != nil {
 		logger.Info("found pki config")
 		res = append(res,
 			"certificate",
 			fmt.Sprintf("--signature=%s", signaturePath),
 			"--certificate_chain", cfg.PkiConfig.CertificateAuthority,
 		)
-		return res
+	} else {
+		logger.Info("missing validation config")
+		return []string{}
 	}
-	logger.Info("missing validation config")
-	return []string{}
+
+	if cfg.ClientTrustConfig != nil {
+		res = append(res, "--trust_config", cfg.ClientTrustConfig.TrustConfigPath)
+	}
+	return res
 }

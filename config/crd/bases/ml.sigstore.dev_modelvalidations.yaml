@@ -58,6 +58,19 @@ spec:
               config:
                 description: Configuration for validation methods.
                 properties:
+                  clientTrustConfig:
+                    description: ClientTrustConfig is the configuration for client
+                      trust settings.
+                    properties:
+                      trustConfigPath:
+                        description: |-
+                          TrustConfigPath is the path to the trust configuration file.
+                          This specifies the trust configuration needed for using private rekor/fulcio instances
+                          and should conform to the ClientTrustConfig message.
+                        type: string
+                    required:
+                    - trustConfigPath
+                    type: object
                   pkiConfig:
                     description: |-
                       PkiConfig defines the PKI-based verification configuration
