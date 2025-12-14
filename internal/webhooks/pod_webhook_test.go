@@ -458,5 +458,58 @@ var _ = Describe("Pod webhook", func() {
 			By("Cleanup override namespace")
 			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: overrideTestNamespace}})
 		})
+
+		It("Should use configured ImagePullPolicy for init container", func() {
+			pullPolicyTestName := "pull-policy-test"
+			pullPolicyTestNamespace := fmt.Sprintf("pull-policy-ns-%d", time.Now().UnixNano())
+
+			By("Creating the Namespace for pull policy test")
+			pullPolicyNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: pullPolicyTestNamespace,
+				},
+			}
+			err := k8sClient.Create(ctx, pullPolicyNs)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Create ModelValidation with IfNotPresent ImagePullPolicy")
+			pullPolicyMv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:           pullPolicyTestName,
+				Namespace:      pullPolicyTestNamespace,
+				ConfigType:     "sigstore",
+				CertIdentity:   "pullpolicy@example.com",
+				CertOidcIssuer: "https://accounts.google.com",
+			})
+			pullPolicyMv.Spec.ImagePullPolicy = corev1.PullIfNotPresent
+			err = k8sClient.Create(ctx, pullPolicyMv)
+			Expect(err).To(Not(HaveOccurred()))
+
+			statusTracker.AddModelValidation(ctx, pullPolicyMv)
+
+			By("create labeled pod")
+			pullPolicyPod := testutil.CreateTestPod(testutil.TestPodOptions{
+				Name:      "pull-policy-pod",
+				Namespace: pullPolicyTestNamespace,
+				Labels:    map[string]string{constants.ModelValidationLabel: pullPolicyTestName},
+			})
+			err = k8sClient.Create(ctx, pullPolicyPod)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Checking that init container has IfNotPresent pull policy")
+			foundPullPolicyPod := &corev1.Pod{}
+			Eventually(ctx, func(ctx context.Context) corev1.PullPolicy {
+				_ = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "pull-policy-pod",
+					Namespace: pullPolicyTestNamespace,
+				}, foundPullPolicyPod)
+				if len(foundPullPolicyPod.Spec.InitContainers) == 0 {
+					return ""
+				}
+				return foundPullPolicyPod.Spec.InitContainers[0].ImagePullPolicy
+			}, 5*time.Second).Should(Equal(corev1.PullIfNotPresent))
+
+			By("Cleanup pull policy namespace")
+			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: pullPolicyTestNamespace}})
+		})
 	})
 })

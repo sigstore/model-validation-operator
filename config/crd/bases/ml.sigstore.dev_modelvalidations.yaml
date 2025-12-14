@@ -128,6 +128,12 @@ spec:
                 - message: exactly one validation method must be specified
                   rule: '[has(self.sigstoreConfig), has(self.pkiConfig), has(self.publicKeyConfig)].filter(x,
                     x).size() == 1'
+              imagePullPolicy:
+                default: Always
+                description: |-
+                  ImagePullPolicy defines the pull policy for the init container.
+                  Defaults to Always if not specified.
+                type: string
               model:
                 description: Model details.
                 properties:

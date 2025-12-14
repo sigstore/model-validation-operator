@@ -121,9 +121,16 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 	for _, c := range pod.Spec.Containers {
 		vm = append(vm, c.VolumeMounts...)
 	}
+
+	// Use the configured ImagePullPolicy, default to Always if not specified
+	imagePullPolicy := mv.Spec.ImagePullPolicy
+	if imagePullPolicy == "" {
+		imagePullPolicy = corev1.PullAlways
+	}
+
 	pp.Spec.InitContainers = append(pp.Spec.InitContainers, corev1.Container{
 		Name:            constants.ModelValidationInitContainerName,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: imagePullPolicy,
 		Image:           constants.ModelTransparencyCliImage,
 		Command:         []string{"/usr/local/bin/model_signing"},
 		Args:            args,

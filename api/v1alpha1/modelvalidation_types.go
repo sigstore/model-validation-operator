@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -124,6 +125,11 @@ type ModelValidationSpec struct {
 	// Configuration for validation methods.
 	// Exactly one validation method must be specified.
 	Config ValidationConfig `json:"config"`
+	// ImagePullPolicy defines the pull policy for the init container.
+	// Defaults to Always if not specified.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=Always
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 }
 
 // PodTrackingInfo contains information about a tracked pod
