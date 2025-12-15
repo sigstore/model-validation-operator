@@ -40,7 +40,7 @@ jobs:
         tar -czvf signed_model_bundle.tar.gz -C $(pwd)/testdata/tensorflow_saved_model .
 
     - name: Upload signed model artifact
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: signed-model-bundle
         path: signed_model_bundle.tar.gz
