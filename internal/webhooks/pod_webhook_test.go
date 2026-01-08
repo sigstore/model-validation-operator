@@ -379,6 +379,191 @@ var _ = Describe("Pod webhook", func() {
 			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: annotationsTestNamespace}})
 		})
 
+		It("Should handle edge cases in ignore-paths annotation", func() {
+			edgeTestName := "edge-test"
+			edgeTestNamespace := fmt.Sprintf("edge-ns-%d", time.Now().UnixNano())
+
+			By("Creating the Namespace for edge case test")
+			edgeNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: edgeTestNamespace,
+				},
+			}
+			err := k8sClient.Create(ctx, edgeNs)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Create ModelValidation without ignore options")
+			edgeMv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:           edgeTestName,
+				Namespace:      edgeTestNamespace,
+				ConfigType:     "sigstore",
+				CertIdentity:   "edge@example.com",
+				CertOidcIssuer: "https://accounts.google.com",
+				ModelPath:      "/path/to/edge/model.onnx",
+				SignaturePath:  "/path/to/edge/model.onnx.sig",
+			})
+			err = k8sClient.Create(ctx, edgeMv)
+			Expect(err).To(Not(HaveOccurred()))
+
+			statusTracker.AddModelValidation(ctx, edgeMv)
+
+			By("create pod with ignore-paths containing empty/whitespace entries")
+			edgePod := testutil.CreateTestPod(testutil.TestPodOptions{
+				Name:      "edge-pod",
+				Namespace: edgeTestNamespace,
+				Labels:    map[string]string{constants.ModelValidationLabel: edgeTestName},
+				Annotations: map[string]string{
+					// Mixed valid paths with empty strings and whitespace
+					constants.IgnorePathsAnnotationKey: "/valid/path1, , /valid/path2,   ,/valid/path3",
+				},
+			})
+			err = k8sClient.Create(ctx, edgePod)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Checking that validation sidecar filters empty entries")
+			foundEdgePod := &corev1.Pod{}
+			Eventually(ctx, func(ctx context.Context) []corev1.Container {
+				_ = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "edge-pod",
+					Namespace: edgeTestNamespace,
+				}, foundEdgePod)
+				return foundEdgePod.Spec.InitContainers
+			}, 5*time.Second).Should(HaveLen(1))
+
+			By("Verifying only valid paths are present in arguments")
+			initContainer := foundEdgePod.Spec.InitContainers[0]
+			args := initContainer.Args
+
+			expectIgnorePathsWithValues(args, "/valid/path1", "/valid/path2", "/valid/path3")
+
+			By("Cleanup edge namespace")
+			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: edgeTestNamespace}})
+		})
+
+		It("Should handle all-empty ignore-paths annotation", func() {
+			allEmptyTestName := "all-empty-test"
+			allEmptyTestNamespace := fmt.Sprintf("all-empty-ns-%d", time.Now().UnixNano())
+
+			By("Creating the Namespace for all-empty test")
+			allEmptyNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: allEmptyTestNamespace,
+				},
+			}
+			err := k8sClient.Create(ctx, allEmptyNs)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Create ModelValidation without ignore options")
+			allEmptyMv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:           allEmptyTestName,
+				Namespace:      allEmptyTestNamespace,
+				ConfigType:     "sigstore",
+				CertIdentity:   "allempty@example.com",
+				CertOidcIssuer: "https://accounts.google.com",
+				ModelPath:      "/path/to/allempty/model.onnx",
+				SignaturePath:  "/path/to/allempty/model.onnx.sig",
+			})
+			err = k8sClient.Create(ctx, allEmptyMv)
+			Expect(err).To(Not(HaveOccurred()))
+
+			statusTracker.AddModelValidation(ctx, allEmptyMv)
+
+			By("create pod with ignore-paths containing only empty/whitespace entries")
+			allEmptyPod := testutil.CreateTestPod(testutil.TestPodOptions{
+				Name:      "all-empty-pod",
+				Namespace: allEmptyTestNamespace,
+				Labels:    map[string]string{constants.ModelValidationLabel: allEmptyTestName},
+				Annotations: map[string]string{
+					constants.IgnorePathsAnnotationKey: " , , ,   ",
+				},
+			})
+			err = k8sClient.Create(ctx, allEmptyPod)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Checking that validation sidecar was created")
+			foundAllEmptyPod := &corev1.Pod{}
+			Eventually(ctx, func(ctx context.Context) []corev1.Container {
+				_ = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "all-empty-pod",
+					Namespace: allEmptyTestNamespace,
+				}, foundAllEmptyPod)
+				return foundAllEmptyPod.Spec.InitContainers
+			}, 5*time.Second).Should(HaveLen(1))
+
+			By("Verifying no ignore-paths arguments are present")
+			initContainer := foundAllEmptyPod.Spec.InitContainers[0]
+			args := initContainer.Args
+
+			Expect(args).ToNot(ContainElement("--ignore-paths"))
+
+			By("Cleanup all-empty namespace")
+			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: allEmptyTestNamespace}})
+		})
+
+		It("Should handle boolean annotations with whitespace", func() {
+			whitespaceTestName := "whitespace-test"
+			whitespaceTestNamespace := fmt.Sprintf("whitespace-ns-%d", time.Now().UnixNano())
+
+			By("Creating the Namespace for whitespace test")
+			whitespaceNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: whitespaceTestNamespace,
+				},
+			}
+			err := k8sClient.Create(ctx, whitespaceNs)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Create ModelValidation without ignore options")
+			whitespaceMv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:           whitespaceTestName,
+				Namespace:      whitespaceTestNamespace,
+				ConfigType:     "sigstore",
+				CertIdentity:   "whitespace@example.com",
+				CertOidcIssuer: "https://accounts.google.com",
+				ModelPath:      "/path/to/whitespace/model.onnx",
+				SignaturePath:  "/path/to/whitespace/model.onnx.sig",
+			})
+			err = k8sClient.Create(ctx, whitespaceMv)
+			Expect(err).To(Not(HaveOccurred()))
+
+			statusTracker.AddModelValidation(ctx, whitespaceMv)
+
+			By("create pod with boolean annotations containing whitespace")
+			whitespacePod := testutil.CreateTestPod(testutil.TestPodOptions{
+				Name:      "whitespace-pod",
+				Namespace: whitespaceTestNamespace,
+				Labels:    map[string]string{constants.ModelValidationLabel: whitespaceTestName},
+				Annotations: map[string]string{
+					constants.IgnoreGitPathsAnnotationKey:      " true ",
+					constants.IgnoreUnsignedFilesAnnotationKey: "  false  ",
+					constants.AllowSymlinksAnnotationKey:       " true",
+				},
+			})
+			err = k8sClient.Create(ctx, whitespacePod)
+			Expect(err).To(Not(HaveOccurred()))
+
+			By("Checking that validation sidecar was created")
+			foundWhitespacePod := &corev1.Pod{}
+			Eventually(ctx, func(ctx context.Context) []corev1.Container {
+				_ = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "whitespace-pod",
+					Namespace: whitespaceTestNamespace,
+				}, foundWhitespacePod)
+				return foundWhitespacePod.Spec.InitContainers
+			}, 5*time.Second).Should(HaveLen(1))
+
+			By("Verifying boolean flags are correctly parsed despite whitespace")
+			initContainer := foundWhitespacePod.Spec.InitContainers[0]
+			args := initContainer.Args
+
+			Expect(args).To(ContainElement("--ignore-git-paths"))
+			Expect(args).To(ContainElement("--no-ignore_unsigned_files"))
+			Expect(args).To(ContainElement("--allow_symlinks"))
+
+			By("Cleanup whitespace namespace")
+			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: whitespaceTestNamespace}})
+		})
+
 		It("Should override CRD model options with pod annotations", func() {
 			overrideTestName := "override-test"
 			overrideTestNamespace := fmt.Sprintf("override-ns-%d", time.Now().UnixNano())

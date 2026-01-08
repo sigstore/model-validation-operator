@@ -202,7 +202,8 @@ func validationConfigToArgs(logger logr.Logger, cfg v1alpha1.ValidationConfig, m
 // It returns the parsed value and true if the annotation exists and was successfully parsed,
 // otherwise returns nil, false.
 func parseBoolAnnotation(logger logr.Logger, annotations map[string]string, key, name string) (*bool, bool) {
-	if valStr, ok := annotations[key]; ok {
+	if raw, ok := annotations[key]; ok {
+		valStr := strings.TrimSpace(raw)
 		val, err := strconv.ParseBool(valStr)
 		if err == nil {
 			return &val, true
@@ -215,28 +216,38 @@ func parseBoolAnnotation(logger logr.Logger, annotations map[string]string, key,
 // mergeModelWithAnnotations merges Model settings from ModelValidation CR with pod annotations.
 // Pod annotations take precedence over CR settings.
 func mergeModelWithAnnotations(logger logr.Logger, model v1alpha1.Model, annotations map[string]string) v1alpha1.Model {
+	merged := model.DeepCopy()
+
 	if ignorePathsStr, ok := annotations[constants.IgnorePathsAnnotationKey]; ok && ignorePathsStr != "" {
 		logger.Info("Found ignore-paths annotation", "value", ignorePathsStr)
 		paths := strings.Split(ignorePathsStr, ",")
-		for i := range paths {
-			paths[i] = strings.TrimSpace(paths[i])
+		validPaths := make([]string, 0, len(paths))
+		for _, path := range paths {
+			trimmed := strings.TrimSpace(path)
+			if trimmed != "" {
+				validPaths = append(validPaths, trimmed)
+			}
 		}
-		model.IgnorePaths = paths
+		if len(validPaths) > 0 {
+			merged.IgnorePaths = validPaths
+		} else {
+			logger.Info("No valid paths found in ignore-paths annotation after filtering empty entries")
+		}
 	}
 
 	if val, ok := parseBoolAnnotation(logger, annotations, constants.IgnoreGitPathsAnnotationKey, "ignore-git-paths"); ok {
-		model.IgnoreGitPaths = val
+		merged.IgnoreGitPaths = val
 	}
 
 	val, ok := parseBoolAnnotation(
 		logger, annotations, constants.IgnoreUnsignedFilesAnnotationKey, "ignore-unsigned-files")
 	if ok {
-		model.IgnoreUnsignedFiles = val
+		merged.IgnoreUnsignedFiles = val
 	}
 
 	if val, ok := parseBoolAnnotation(logger, annotations, constants.AllowSymlinksAnnotationKey, "allow-symlinks"); ok {
-		model.AllowSymlinks = val
+		merged.AllowSymlinks = val
 	}
 
-	return model
+	return *merged
 }
