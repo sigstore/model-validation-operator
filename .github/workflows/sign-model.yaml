@@ -17,7 +17,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
     - name: Get OIDC Token
       id: oidc-token
@@ -40,7 +40,7 @@ jobs:
         tar -czvf signed_model_bundle.tar.gz -C $(pwd)/testdata/tensorflow_saved_model .
 
     - name: Upload signed model artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: signed-model-bundle
         path: signed_model_bundle.tar.gz
