@@ -52,6 +52,10 @@ const (
 	// Value should be "true" or "false"
 	AllowSymlinksAnnotationKey = ModelValidationDomain + "/allow-symlinks"
 
+	// ContinuousValidationAnnotationKey is the annotation key used to mark pods with continuous validation enabled
+	// Value should be "true" when continuous validation is enabled
+	ContinuousValidationAnnotationKey = ModelValidationDomain + "/continuous-validation"
+
 	// IgnoreNamespaceValue is the value for the ignore namespace label
 	IgnoreNamespaceValue = "true"
 )

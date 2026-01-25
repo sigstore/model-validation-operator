@@ -125,10 +125,32 @@ spec:
                 - message: exactly one validation method must be specified
                   rule: '[has(self.sigstoreConfig), has(self.pkiConfig), has(self.publicKeyConfig)].filter(x,
                     x).size() == 1'
+              continuousValidation:
+                description: |-
+                  ContinuousValidation enables periodic re-validation of the model.
+                  When enabled, the init container becomes a native sidecar (requires Kubernetes 1.28+).
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled controls whether continuous validation is active.
+                      When true, the validation container runs as a native sidecar with restartPolicy: Always.
+                      When false (default), the validation container runs as a standard init container.
+                    type: boolean
+                  interval:
+                    default: 5m
+                    description: |-
+                      Interval defines how often to re-validate the model (e.g., "5m", "1h").
+                      Only used when Enabled is true.
+                    pattern: ^([0-9]+(\.[0-9]+)?(s|m|h))+$
+                    type: string
+                required:
+                - enabled
+                type: object
               imagePullPolicy:
                 default: Always
                 description: |-
-                  ImagePullPolicy defines the pull policy for the init container.
+                  ImagePullPolicy specifies the pull policy for the validation container image.
                   Defaults to Always if not specified.
                 type: string
               model:

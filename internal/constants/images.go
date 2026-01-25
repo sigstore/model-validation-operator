@@ -24,4 +24,8 @@ var (
 	// ModelTransparencyCliImage is the default image for the model transparency CLI
 	// used as an init container to validate model signatures
 	ModelTransparencyCliImage = "ghcr.io/sigstore/model-transparency-cli:v1.0.1"
+
+	// ModelValidationAgentImage is the image for the validation agent that wraps
+	// model-transparency-cli for continuous validation scenarios
+	ModelValidationAgentImage = "ghcr.io/sigstore/model-validation-agent:v0.1.0"
 )

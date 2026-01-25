@@ -1,0 +1,48 @@
+apiVersion: ml.sigstore.dev/v1alpha1
+kind: ModelValidation
+metadata:
+  name: continuous-signed-test
+spec:
+  config:
+    publicKeyConfig:
+      keyPath: /keys/test_public_key.pub
+  model:
+    path: /data
+    signaturePath: /data/model.sig
+  imagePullPolicy: IfNotPresent
+  continuousValidation:
+    enabled: true
+    interval: "5m"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    validation.ml.sigstore.dev/ml: continuous-signed-test
+  name: test-pod-signed
+spec:
+  # Init container to copy model files from test image
+  initContainers:
+  - name: model-loader
+    image: localhost/model-validation-test-model:latest
+    imagePullPolicy: IfNotPresent
+    command: ['sh', '-c', 'cp -r /data/* /model-data/ && cp -r /keys/* /key-data/ && chmod -R 755 /model-data /key-data']
+    volumeMounts:
+    - mountPath: /model-data
+      name: model-storage
+    - mountPath: /key-data
+      name: key-storage
+  containers:
+  - name: app
+    image: nginx:latest
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - mountPath: /data
+      name: model-storage
+    - mountPath: /keys
+      name: key-storage
+  volumes:
+  - name: model-storage
+    emptyDir: {}
+  - name: key-storage
+    emptyDir: {}

@@ -33,6 +33,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 )
 
 // NewPodInterceptor creates a new pod mutating webhook to be registered
@@ -122,26 +124,82 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 		vm = append(vm, c.VolumeMounts...)
 	}
 
-	// Use the configured ImagePullPolicy, default to Always if not specified
-	imagePullPolicy := mv.Spec.ImagePullPolicy
-	if imagePullPolicy == "" {
-		imagePullPolicy = corev1.PullAlways
-	}
+	container := buildValidationContainer(mv, args, vm, pp)
+	pp.Spec.InitContainers = append(pp.Spec.InitContainers, container)
 
-	pp.Spec.InitContainers = append(pp.Spec.InitContainers, corev1.Container{
-		Name:            constants.ModelValidationInitContainerName,
-		ImagePullPolicy: imagePullPolicy,
-		Image:           constants.ModelTransparencyCliImage,
-		Command:         []string{"/usr/local/bin/model_signing"},
-		Args:            args,
-		VolumeMounts:    vm,
-	})
 	marshaledPod, err := json.Marshal(pp)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+// buildValidationContainer constructs the validation container with appropriate configuration
+// for either one-shot or continuous validation based on ModelValidation spec
+func buildValidationContainer(
+	mv *v1alpha1.ModelValidation, args []string, vm []corev1.VolumeMount, pp *corev1.Pod,
+) corev1.Container {
+	// Determine image pull policy
+	imagePullPolicy := corev1.PullAlways
+	if mv.Spec.ImagePullPolicy != "" {
+		imagePullPolicy = mv.Spec.ImagePullPolicy
+	}
+
+	container := corev1.Container{
+		Name:            constants.ModelValidationInitContainerName,
+		Image:           constants.ModelValidationAgentImage,
+		ImagePullPolicy: imagePullPolicy,
+		Command:         []string{"/usr/local/bin/validation-agent"},
+		Args:            args,
+		VolumeMounts:    vm,
+	}
+
+	// Add continuous validation configuration if enabled
+	if mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Enabled {
+		interval := "5m"
+		if mv.Spec.ContinuousValidation.Interval != "" {
+			interval = mv.Spec.ContinuousValidation.Interval
+		}
+
+		// Make it a native sidecar with restartPolicy: Always
+		container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)
+
+		// Prepend interval flag to args
+		container.Args = append([]string{"--interval=" + interval}, args...)
+
+		// Add readiness probe (ready after first successful validation)
+		container.ReadinessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/ready",
+					Port: intstr.FromInt(8080),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		}
+
+		// Add liveness probe (healthy while process is running)
+		container.LivenessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt(8080),
+				},
+			},
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       30,
+		}
+
+		// Add annotation to track continuous validation
+		if pp.Annotations == nil {
+			pp.Annotations = make(map[string]string)
+		}
+		pp.Annotations[constants.ContinuousValidationAnnotationKey] = "true"
+	}
+
+	return container
 }
 
 func validationConfigToArgs(logger logr.Logger, cfg v1alpha1.ValidationConfig, model v1alpha1.Model) []string {

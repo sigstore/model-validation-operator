@@ -34,6 +34,9 @@ IMAGE_TAG_BASE ?= ghcr.io/sigstore/model-validation-operator
 # IMG defines the image:tag used for the operator.
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
+# AGENT_IMG defines the image:tag used for the validation agent.
+AGENT_IMG ?= $(IMAGE_TAG_BASE)-agent:v$(VERSION)
+
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
@@ -134,8 +137,15 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
+build: manifests generate fmt vet build-operator build-agent ## Build manager and agent binaries.
+
+.PHONY: build-operator
+build-operator: ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+
+.PHONY: build-agent
+build-agent: ## Build validation-agent binary.
+	go build -o bin/validation-agent cmd/validation-agent/main.go
 
 .PHONY: run
 run: manifests generate fmt vet generate-local-certs ## Run a controller from your host.
@@ -197,6 +207,24 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f ${CONTAINER_FILE}.cross .
 	- $(CONTAINER_TOOL) buildx rm model-validation-operator-builder
 	rm ${CONTAINER_FILE}.cross
+
+.PHONY: docker-build-agent
+docker-build-agent: test ## Build docker image with the validation agent.
+	$(CONTAINER_TOOL) build -t ${AGENT_IMG} -f Dockerfile.agent .
+
+.PHONY: docker-push-agent
+docker-push-agent: ## Push docker image with the validation agent.
+	$(CONTAINER_TOOL) push ${AGENT_IMG}
+
+.PHONY: docker-buildx-agent
+docker-buildx-agent: ## Build and push docker image for the agent for cross-platform support
+	# copy existing Dockerfile.agent and insert --platform=${BUILDPLATFORM} into Dockerfile.agent.cross
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.agent > Dockerfile.agent.cross
+	- $(CONTAINER_TOOL) buildx create --name model-validation-agent-builder
+	$(CONTAINER_TOOL) buildx use model-validation-agent-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${AGENT_IMG} -f Dockerfile.agent.cross .
+	- $(CONTAINER_TOOL) buildx rm model-validation-agent-builder
+	rm Dockerfile.agent.cross
 
 .PHONY: build-installer
 build-installer: manifests ## Generate a consolidated YAML with CRDs and deployment.
@@ -484,13 +512,19 @@ e2e-uninstall-certmanager: ## Uninstall cert-manager
 e2e-build-image:
 	$(CONTAINER_TOOL) build -t $(IMG) -f $(CONTAINER_FILE) .
 
+.PHONY: e2e-build-agent-image
+e2e-build-agent-image:
+	$(CONTAINER_TOOL) build -t $(AGENT_IMG) -f Dockerfile.agent .
+
 .PHONY: e2e-load-images
-e2e-load-images: e2e-build-image e2e-build-test-model
+e2e-load-images: e2e-build-image e2e-build-agent-image e2e-build-test-model
 	@echo "Pulling model-transparency-cli image..."
 	$(CONTAINER_TOOL) pull $(MODEL_TRANSPARENCY_IMG)
 	@echo "Loading manager image into Kind cluster..."
 	$(KIND) load docker-image -n $(KIND_CLUSTER) $(IMG)
-	@echo "Loading model-transparency-cli image into Kind cluster..."  
+	@echo "Loading agent image into Kind cluster..."
+	$(KIND) load docker-image -n $(KIND_CLUSTER) $(AGENT_IMG)
+	@echo "Loading model-transparency-cli image into Kind cluster..."
 	$(KIND) load docker-image -n $(KIND_CLUSTER) $(MODEL_TRANSPARENCY_IMG)
 	@echo "Loading test model image into Kind cluster..."
 	$(KIND) load docker-image -n $(KIND_CLUSTER) $(E2E_TEST_MODEL)

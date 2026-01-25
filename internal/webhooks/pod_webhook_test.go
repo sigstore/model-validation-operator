@@ -132,7 +132,7 @@ var _ = Describe("Pod webhook", func() {
 				WithTransform(func(containers []corev1.Container) int { return len(containers) }, Equal(1)),
 				WithTransform(
 					func(containers []corev1.Container) string { return containers[0].Image },
-					Equal(constants.ModelTransparencyCliImage)),
+					Equal(constants.ModelValidationAgentImage)),
 			))
 
 			By("Checking that finalizer was added")
