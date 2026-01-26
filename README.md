@@ -240,3 +240,60 @@ In case the workload is modified, is not executed:
 ERROR:__main__:verification failed: the manifests do not match
 ```
 
+#### Ignore Options
+
+The `model` section of the ModelValidation CR supports additional options to control which files are included during verification:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ignorePaths` | `[]string` | List of file paths to exclude from verification |
+| `ignoreGitPaths` | `bool` | When `true`, excludes git-related files (e.g., `.git/`, `.gitignore`) |
+| `ignoreUnsignedFiles` | `bool` | When `true`, unsigned files will not cause verification to fail |
+| `allowSymlinks` | `bool` | When `true`, symbolic links will be followed and their targets verified |
+
+Example with ignore options:
+```yaml
+apiVersion: ml.sigstore.dev/v1alpha1
+kind: ModelValidation
+metadata:
+  name: demo
+spec:
+  config:
+    sigstoreConfig:
+      certificateIdentity: "https://github.com/sigstore/model-validation-operator/.github/workflows/sign-model.yaml@refs/tags/v0.0.2"
+      certificateOidcIssuer: "https://token.actions.githubusercontent.com"
+  model:
+    path: /data/tensorflow_saved_model
+    signaturePath: /data/tensorflow_saved_model/model.sig
+    ignorePaths:
+      - /data/tensorflow_saved_model/cache
+      - /data/tensorflow_saved_model/tmp
+    ignoreGitPaths: true
+    allowSymlinks: true
+```
+
+#### Pod Annotations
+
+Ignore options can also be specified or overridden on individual pods using annotations. Pod annotations take precedence over the ModelValidation CR settings.
+
+| Annotation | Value | Description |
+|------------|-------|-------------|
+| `validation.ml.sigstore.dev/ignore-paths` | Comma-separated paths | Paths to exclude from verification |
+| `validation.ml.sigstore.dev/ignore-git-paths` | `"true"` or `"false"` | Exclude git-related files |
+| `validation.ml.sigstore.dev/ignore-unsigned-files` | `"true"` or `"false"` | Allow unsigned files |
+| `validation.ml.sigstore.dev/allow-symlinks` | `"true"` or `"false"` | Follow symbolic links |
+
+Example pod with annotation overrides:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: whatever-workload
+  labels:
+    validation.ml.sigstore.dev/ml: "demo"
+  annotations:
+    validation.ml.sigstore.dev/ignore-paths: "/data/tensorflow_saved_model/logs,/data/tensorflow_saved_model/tmp"
+    validation.ml.sigstore.dev/ignore-git-paths: "true"
+spec:
+  # ... rest of pod spec
+```
