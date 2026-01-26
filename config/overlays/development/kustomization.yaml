@@ -19,6 +19,13 @@ patches:
     name: controller-manager
 - patch: |-
     - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --disable-webhook
+  target:
+    kind: Deployment
+    name: controller-manager
+- patch: |-
+    - op: add
       path: /metadata/labels/validation.ml.sigstore.dev~1ignore
       value: "true"
   target:

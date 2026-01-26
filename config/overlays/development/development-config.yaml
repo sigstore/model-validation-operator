@@ -8,6 +8,7 @@ spec:
     spec:
       containers:
       - name: manager
+        imagePullPolicy: IfNotPresent
         resources:
           limits:
             cpu: 200m
