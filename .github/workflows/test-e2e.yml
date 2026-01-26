@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: Create kind cluster
-        uses: helm/kind-action@ca7011b09d9a57d57555716e97a4acea579a2b92 # v1
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1
         with:
           cluster_name: kind
 
