@@ -21,8 +21,15 @@ The operator can be installed via [kustomize](https://kustomize.io/) using diffe
 
 #### Production Deployment
 For production environments with cert-manager integration:
+
+**Prerequisites:** Install [cert-manager](https://cert-manager.io/) first:
 ```bash
-kubectl apply -k https://raw.githubusercontent.com/sigstore/model-validation-operator/main/config/overlays/production
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+```
+
+Then deploy the operator:
+```bash
+kubectl apply -k https://github.com/sigstore/model-validation-operator/config/overlays/production
 # or local
 kubectl apply -k config/overlays/production
 ```
@@ -30,7 +37,7 @@ kubectl apply -k config/overlays/production
 #### Testing Deployment
 For testing environments with manual certificate management:
 ```bash
-kubectl apply -k https://raw.githubusercontent.com/sigstore/model-validation-operator/main/config/overlays/testing
+kubectl apply -k https://github.com/sigstore/model-validation-operator/config/overlays/testing
 # or local
 kubectl apply -k config/overlays/testing
 ```
@@ -38,7 +45,7 @@ kubectl apply -k config/overlays/testing
 #### Development Deployment
 For development environments, deploying the operator without the webhook integration:
 ```bash
-kubectl apply -k https://raw.githubusercontent.com/sigstore/model-validation-operator/main/config/overlays/development
+kubectl apply -k https://github.com/sigstore/model-validation-operator/config/overlays/development
 # or local
 kubectl apply -k config/overlays/development
 ```
@@ -46,7 +53,7 @@ kubectl apply -k config/overlays/development
 #### OLM Deployment
 For OpenShift/OLM environments:
 ```bash
-kubectl apply -k https://raw.githubusercontent.com/sigstore/model-validation-operator/main/config/overlays/olm
+kubectl apply -k https://github.com/sigstore/model-validation-operator/config/overlays/olm
 # or local
 kubectl apply -k config/overlays/olm
 ```
