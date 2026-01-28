@@ -18,3 +18,5 @@ spec:
         env:
         - name: ENVIRONMENT
           value: "production"
+        - name: MODEL_TRANSPARENCY_CLI_IMAGE
+          value: "ghcr.io/sigstore/model-transparency-cli:latest"
