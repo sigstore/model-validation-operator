@@ -35,7 +35,8 @@ IMAGE_TAG_BASE ?= ghcr.io/sigstore/model-validation-operator
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
 # AGENT_IMG defines the image:tag used for the validation agent.
-AGENT_IMG ?= $(IMAGE_TAG_BASE)-agent:v$(VERSION)
+# Use the same agent image name as hardcoded in internal/constants/images.go
+AGENT_IMG ?= ghcr.io/sigstore/model-validation-agent:v0.1.0
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)

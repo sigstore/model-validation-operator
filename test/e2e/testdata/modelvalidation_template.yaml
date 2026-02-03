@@ -10,3 +10,4 @@ spec:
   model:
     path: /data
     signaturePath: /data/model.sig
+  imagePullPolicy: IfNotPresent
