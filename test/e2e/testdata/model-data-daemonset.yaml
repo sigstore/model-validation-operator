@@ -18,7 +18,7 @@ spec:
       - name: model-setup
         image: model-validation-test-model:latest
         imagePullPolicy: Never
-        command: 
+        command:
         - sh
         - -c
         - |
@@ -26,6 +26,8 @@ spec:
           mkdir -p /host-data /host-keys
           cp -r /data/* /host-data/
           cp -r /keys/* /host-keys/
+          # Make files readable by all users (validation-agent runs as UID 65532)
+          chmod -R a+rX /host-data /host-keys
           echo "Model data setup complete on node $NODE_NAME"
           # Keep running so DaemonSet stays active
           sleep infinity

@@ -84,12 +84,10 @@ func main() {
 				return
 			}
 		}
-	} else {
-		// One-shot mode: wait for signal (keep container running if validation succeeded)
-		logger.Info("One-shot validation complete, waiting for shutdown signal")
-		<-ctx.Done()
-		logger.Info("Shutting down gracefully")
 	}
+	// One-shot mode: validation complete, exit immediately (for init containers)
+	logger.Info("One-shot validation complete, exiting")
+	// Exit code 0 (success already handled, failures exit earlier at line 52)
 }
 
 func runValidation(args []string, logger logr.Logger) error {
@@ -101,7 +99,8 @@ func runValidation(args []string, logger logr.Logger) error {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	logger.V(1).Info("Validation output", "output", string(output))
+	// Log successful validation output at default level so it's visible in pod logs
+	logger.Info("Validation output", "output", string(output))
 	return nil
 }
 
