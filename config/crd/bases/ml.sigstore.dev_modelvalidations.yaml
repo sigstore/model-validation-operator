@@ -128,7 +128,8 @@ spec:
               continuousValidation:
                 description: |-
                   ContinuousValidation enables periodic re-validation of the model.
-                  When enabled, the init container becomes a native sidecar (requires Kubernetes 1.28+).
+                  When enabled, the init container becomes a native sidecar.
+                  Requires Kubernetes 1.28+ with SidecarContainers feature gate enabled, or 1.29+ (enabled by default).
                 properties:
                   enabled:
                     default: false
@@ -142,8 +143,12 @@ spec:
                     description: |-
                       Interval defines how often to re-validate the model (e.g., "5m", "1h").
                       Only used when Enabled is true.
-                    pattern: ^([0-9]+(\.[0-9]+)?(s|m|h))+$
+                      Minimum interval is 1m to prevent excessive CPU usage.
+                    pattern: ^([0-9]+(\.[0-9]+)?(m|h))+$
                     type: string
+                    x-kubernetes-validations:
+                    - message: interval must be at least 1m
+                      rule: self == '' || duration(self) >= duration('1m')
                 required:
                 - enabled
                 type: object

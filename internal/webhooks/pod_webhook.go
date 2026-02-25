@@ -25,6 +25,7 @@ import (
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -150,7 +151,7 @@ func buildValidationContainer(
 		Name:            constants.ModelValidationInitContainerName,
 		Image:           constants.ModelValidationAgentImage,
 		ImagePullPolicy: imagePullPolicy,
-		Command:         []string{"/usr/local/bin/validation-agent"},
+		Command:         []string{"/usr/local/bin/model_signing"},
 		Args:            args,
 		VolumeMounts:    vm,
 	}
@@ -161,6 +162,9 @@ func buildValidationContainer(
 		if mv.Spec.ContinuousValidation.Interval != "" {
 			interval = mv.Spec.ContinuousValidation.Interval
 		}
+
+		// Switch to validation-agent binary for continuous mode
+		container.Command = []string{"/usr/local/bin/validation-agent"}
 
 		// Make it a native sidecar with restartPolicy: Always
 		container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)
@@ -192,7 +196,19 @@ func buildValidationContainer(
 			PeriodSeconds:       30,
 		}
 
-		// Add annotation to track continuous validation
+		// Add resource limits to prevent unbounded resource allocation
+		container.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+		}
+
+		// Add annotation to track continuous validation (for informational/tracking purposes)
 		if pp.Annotations == nil {
 			pp.Annotations = make(map[string]string)
 		}

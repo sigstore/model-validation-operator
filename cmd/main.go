@@ -108,11 +108,11 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&disableWebhook, "disable-webhook", false,
 		"Disable the webhook server for development environments without certificates.")
-	utils.StringFlagOrEnv(&constants.ModelTransparencyCliImage,
-		"model-transparency-cli-image",
-		"MODEL_TRANSPARENCY_CLI_IMAGE",
-		constants.ModelTransparencyCliImage,
-		"Model transparency CLI image to be used.")
+	utils.StringFlagOrEnv(&constants.ModelValidationAgentImage,
+		"validation-agent-image",
+		"VALIDATION_AGENT_IMAGE",
+		constants.ModelValidationAgentImage,
+		"Validation agent image to be used.")
 
 	// Status tracker configuration flags
 	flag.DurationVar(&debounceDuration, "debounce-duration", defaultDebounceDuration,

@@ -37,8 +37,16 @@ func main() {
 
 	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort)
 
-	// Start health server
-	go startHealthServer(healthPort, logger)
+	// Setup signal handling
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	// Start health server with graceful shutdown support
+	healthServerDone := make(chan struct{})
+	go func() {
+		startHealthServer(ctx, healthPort, logger)
+		close(healthServerDone)
+	}()
 
 	// Validation args are remaining flags (passed to model-transparency-cli)
 	validationArgs := flag.Args()
@@ -56,10 +64,6 @@ func main() {
 		logger.Info("Initial validation successful")
 		markReady()
 	}
-
-	// Setup signal handling
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
 
 	// Continuous validation loop
 	if interval > 0 {
@@ -81,12 +85,15 @@ func main() {
 				}
 			case <-ctx.Done():
 				logger.Info("Shutting down gracefully")
+				<-healthServerDone
 				return
 			}
 		}
 	}
 	// One-shot mode: validation complete, exit immediately (for init containers)
 	logger.Info("One-shot validation complete, exiting")
+	cancel() // Trigger health server shutdown
+	<-healthServerDone
 	// Exit code 0 (success already handled, failures exit earlier at line 52)
 }
 
@@ -104,7 +111,7 @@ func runValidation(args []string, logger logr.Logger) error {
 	return nil
 }
 
-func startHealthServer(port int, logger logr.Logger) {
+func startHealthServer(ctx context.Context, port int, logger logr.Logger) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -134,9 +141,23 @@ func startHealthServer(port int, logger logr.Logger) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	if err := server.ListenAndServe(); err != nil {
-		logger.Error(err, "Health server failed")
-		os.Exit(1)
+	// Start server in a goroutine
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error(err, "Health server failed")
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for context cancellation, then gracefully shutdown
+	<-ctx.Done()
+	logger.Info("Shutting down health server")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error(err, "Health server shutdown error")
 	}
 }
 

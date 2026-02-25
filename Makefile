@@ -35,8 +35,11 @@ IMAGE_TAG_BASE ?= ghcr.io/sigstore/model-validation-operator
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
 # AGENT_IMG defines the image:tag used for the validation agent.
-# Use the same agent image name as hardcoded in internal/constants/images.go
+# This is injected into the operator binary via ldflags at build time.
 AGENT_IMG ?= ghcr.io/sigstore/model-validation-agent:v0.1.0
+
+# LDFLAGS to inject the agent image into the operator binary
+LDFLAGS := -X github.com/sigstore/model-validation-operator/internal/constants.ModelValidationAgentImage=$(AGENT_IMG)
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -142,7 +145,7 @@ build: manifests generate fmt vet build-operator build-agent ## Build manager an
 
 .PHONY: build-operator
 build-operator: ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags="$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: build-agent
 build-agent: ## Build validation-agent binary.
@@ -150,7 +153,7 @@ build-agent: ## Build validation-agent binary.
 
 .PHONY: run
 run: manifests generate fmt vet generate-local-certs ## Run a controller from your host.
-	go run ./cmd/main.go
+	go run -ldflags="$(LDFLAGS)" ./cmd/main.go
 
 .PHONY: generate-certs
 generate-certs: ## Generate TLS certificates to specified directory (use CERT_DIR=path)
@@ -186,7 +189,7 @@ generate-local-certs: ## Generate TLS certificates for local development
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} -f ${CONTAINER_FILE} .
+	$(CONTAINER_TOOL) build -t ${IMG} --build-arg AGENT_IMG=${AGENT_IMG} -f ${CONTAINER_FILE} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -205,7 +208,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' ${CONTAINER_FILE} > ${CONTAINER_FILE}.cross
 	- $(CONTAINER_TOOL) buildx create --name model-validation-operator-builder
 	$(CONTAINER_TOOL) buildx use model-validation-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f ${CONTAINER_FILE}.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --build-arg AGENT_IMG=${AGENT_IMG} --tag ${IMG} -f ${CONTAINER_FILE}.cross .
 	- $(CONTAINER_TOOL) buildx rm model-validation-operator-builder
 	rm ${CONTAINER_FILE}.cross
 
@@ -511,7 +514,7 @@ e2e-uninstall-certmanager: ## Uninstall cert-manager
 
 .PHONY: e2e-build-image
 e2e-build-image:
-	$(CONTAINER_TOOL) build -t $(IMG) -f $(CONTAINER_FILE) .
+	$(CONTAINER_TOOL) build -t $(IMG) --build-arg AGENT_IMG=${AGENT_IMG} -f $(CONTAINER_FILE) .
 
 .PHONY: e2e-build-agent-image
 e2e-build-agent-image:

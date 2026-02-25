@@ -116,8 +116,10 @@ type ValidationConfig struct {
 }
 
 // ContinuousValidation defines the configuration for continuous model validation.
-// When enabled, the validation container runs as a native sidecar (requires Kubernetes 1.28+)
-// with restartPolicy: Always, allowing periodic re-validation of the model.
+// When enabled, the validation container runs as a native sidecar with restartPolicy: Always,
+// allowing periodic re-validation of the model.
+// Note: Native sidecar support requires Kubernetes 1.28+ with the feature explicitly enabled,
+// or Kubernetes 1.29+ where it is enabled by default.
 type ContinuousValidation struct {
 	// Enabled controls whether continuous validation is active.
 	// When true, the validation container runs as a native sidecar with restartPolicy: Always.
@@ -127,8 +129,10 @@ type ContinuousValidation struct {
 
 	// Interval defines how often to re-validate the model (e.g., "5m", "1h").
 	// Only used when Enabled is true.
+	// Minimum interval is 1m to prevent excessive CPU usage.
 	// +kubebuilder:default="5m"
-	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(s|m|h))+$`
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(m|h))+$`
+	// +kubebuilder:validation:XValidation:rule="self == '' || duration(self) >= duration('1m')", message="interval must be at least 1m"
 	Interval string `json:"interval,omitempty"`
 }
 
@@ -150,7 +154,8 @@ type ModelValidationSpec struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
 	// ContinuousValidation enables periodic re-validation of the model.
-	// When enabled, the init container becomes a native sidecar (requires Kubernetes 1.28+).
+	// When enabled, the init container becomes a native sidecar.
+	// Requires Kubernetes 1.28+ with SidecarContainers feature gate enabled, or 1.29+ (enabled by default).
 	// +kubebuilder:validation:Optional
 	ContinuousValidation *ContinuousValidation `json:"continuousValidation,omitempty"`
 }

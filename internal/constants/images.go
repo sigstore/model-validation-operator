@@ -21,11 +21,11 @@ const (
 )
 
 var (
-	// ModelTransparencyCliImage is the default image for the model transparency CLI
-	// used as an init container to validate model signatures
-	ModelTransparencyCliImage = "ghcr.io/sigstore/model-transparency-cli:v1.0.1"
-
-	// ModelValidationAgentImage is the image for the validation agent that wraps
-	// model-transparency-cli for continuous validation scenarios
+	// ModelValidationAgentImage is the image for the validation agent.
+	// It builds on top of model-transparency-cli and contains both the
+	// model_signing binary (used for one-shot validation) and the
+	// validation-agent binary (used for continuous validation).
+	// This can be overridden at build time via ldflags:
+	//   go build -ldflags="-X github.com/sigstore/model-validation-operator/internal/constants.ModelValidationAgentImage=myimage:tag"
 	ModelValidationAgentImage = "ghcr.io/sigstore/model-validation-agent:v0.1.0"
 )
