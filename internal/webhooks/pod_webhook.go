@@ -196,23 +196,27 @@ func buildValidationContainer(
 			PeriodSeconds:       30,
 		}
 
-		// Add resource limits to prevent unbounded resource allocation
-		container.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("10m"),
-				corev1.ResourceMemory: resource.MustParse("32Mi"),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("100m"),
-				corev1.ResourceMemory: resource.MustParse("128Mi"),
-			},
-		}
-
 		// Add annotation to track continuous validation (for informational/tracking purposes)
 		if pp.Annotations == nil {
 			pp.Annotations = make(map[string]string)
 		}
 		pp.Annotations[constants.ContinuousValidationAnnotationKey] = "true"
+	}
+
+	// Apply resource requirements (for both one-shot and continuous modes)
+	if mv.Spec.Resources != nil {
+		container.Resources = *mv.Spec.Resources
+	} else {
+		container.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+		}
 	}
 
 	return container

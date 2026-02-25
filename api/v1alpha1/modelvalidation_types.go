@@ -158,6 +158,11 @@ type ModelValidationSpec struct {
 	// Requires Kubernetes 1.28+ with SidecarContainers feature gate enabled, or 1.29+ (enabled by default).
 	// +kubebuilder:validation:Optional
 	ContinuousValidation *ContinuousValidation `json:"continuousValidation,omitempty"`
+
+	// Resources specifies the compute resource requirements for the validation container.
+	// If not specified, defaults are applied: CPU requests=100m/limits=1, Memory requests=128Mi/limits=512Mi.
+	// +kubebuilder:validation:Optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // PodTrackingInfo contains information about a tracked pod
@@ -255,6 +260,27 @@ func (mv *ModelValidation) GetConfigHash() string {
 			hasher.Write([]byte(mv.Spec.ContinuousValidation.Interval))
 		} else {
 			hasher.Write([]byte("continuous-disabled"))
+		}
+	}
+
+	// Include resource requirements
+	if mv.Spec.Resources != nil {
+		hasher.Write([]byte("resources"))
+		if mv.Spec.Resources.Requests != nil {
+			if q, ok := mv.Spec.Resources.Requests[corev1.ResourceCPU]; ok {
+				hasher.Write([]byte("req-cpu:" + q.String()))
+			}
+			if q, ok := mv.Spec.Resources.Requests[corev1.ResourceMemory]; ok {
+				hasher.Write([]byte("req-mem:" + q.String()))
+			}
+		}
+		if mv.Spec.Resources.Limits != nil {
+			if q, ok := mv.Spec.Resources.Limits[corev1.ResourceCPU]; ok {
+				hasher.Write([]byte("lim-cpu:" + q.String()))
+			}
+			if q, ok := mv.Spec.Resources.Limits[corev1.ResourceMemory]; ok {
+				hasher.Write([]byte("lim-mem:" + q.String()))
+			}
 		}
 	}
 

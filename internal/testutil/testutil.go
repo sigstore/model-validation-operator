@@ -38,6 +38,7 @@ type TestModelValidationOptions struct {
 	IgnoreGitPaths      *bool
 	IgnoreUnsignedFiles *bool
 	AllowSymlinks       *bool
+	Resources           *corev1.ResourceRequirements
 }
 
 // TestPodOptions holds configuration for creating test Pod resources
@@ -86,6 +87,11 @@ func CreateTestModelValidation(opts TestModelValidationOptions) *v1alpha1.ModelV
 				AllowSymlinks:       opts.AllowSymlinks,
 			},
 		},
+	}
+
+	// Configure resources
+	if opts.Resources != nil {
+		mv.Spec.Resources = opts.Resources
 	}
 
 	// Configure auth method
