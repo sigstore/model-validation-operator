@@ -1,5 +1,6 @@
-// Package main implements the validation agent that wraps model-transparency-cli
-// for both one-shot and continuous validation of AI models.
+// Package main implements the validation agent that natively validates
+// AI models using the model-transparency-go library for both one-shot
+// and continuous validation.
 package main
 
 import (
@@ -8,13 +9,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/sigstore/model-validation-operator/internal/validation"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -53,7 +54,7 @@ func main() {
 
 	// Run initial validation
 	logger.Info("Running initial validation")
-	if err := runValidation(validationArgs, logger); err != nil {
+	if err := runValidation(ctx, validationArgs, logger); err != nil {
 		logger.Error(err, "Initial validation failed")
 		if interval == 0 {
 			// One-shot mode: exit with error
@@ -75,7 +76,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				logger.Info("Running periodic validation")
-				if err := runValidation(validationArgs, logger); err != nil {
+				if err := runValidation(ctx, validationArgs, logger); err != nil {
 					logger.Error(err, "Validation failed")
 					// Don't unmark ready - once ready, stay ready
 					// This allows the pod to continue running despite transient failures
@@ -97,18 +98,12 @@ func main() {
 	// Exit code 0 (success already handled, failures exit earlier at line 52)
 }
 
-func runValidation(args []string, logger logr.Logger) error {
-	cmd := exec.Command("/usr/local/bin/model_signing", args...)
-
-	output, err := cmd.CombinedOutput()
+func runValidation(ctx context.Context, args []string, logger logr.Logger) error {
+	cfg, err := validation.ParseArgs(args)
 	if err != nil {
-		logger.Error(err, "Validation command failed", "output", string(output))
-		return fmt.Errorf("validation failed: %w", err)
+		return fmt.Errorf("failed to parse validation args: %w", err)
 	}
-
-	// Log successful validation output at default level so it's visible in pod logs
-	logger.Info("Validation output", "output", string(output))
-	return nil
+	return validation.Validate(ctx, cfg, logger)
 }
 
 func startHealthServer(ctx context.Context, port int, logger logr.Logger) {

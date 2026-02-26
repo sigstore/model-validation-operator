@@ -151,7 +151,7 @@ func buildValidationContainer(
 		Name:            constants.ModelValidationInitContainerName,
 		Image:           constants.ModelValidationAgentImage,
 		ImagePullPolicy: imagePullPolicy,
-		Command:         []string{"/usr/local/bin/model_signing"},
+		Command:         []string{"/usr/local/bin/validation-agent"},
 		Args:            args,
 		VolumeMounts:    vm,
 	}
@@ -162,9 +162,6 @@ func buildValidationContainer(
 		if mv.Spec.ContinuousValidation.Interval != "" {
 			interval = mv.Spec.ContinuousValidation.Interval
 		}
-
-		// Switch to validation-agent binary for continuous mode
-		container.Command = []string{"/usr/local/bin/validation-agent"}
 
 		// Make it a native sidecar with restartPolicy: Always
 		container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)

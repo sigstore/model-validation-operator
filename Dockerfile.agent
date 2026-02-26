@@ -14,11 +14,10 @@ COPY api/ api/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -o validation-agent cmd/validation-agent/main.go
 
-FROM ghcr.io/sigstore/model-transparency-cli:v1.0.1
+FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /
 
-# Copy the agent binary from builder
 COPY --from=agent-builder /workspace/validation-agent /usr/local/bin/
 
 USER 65532:65532

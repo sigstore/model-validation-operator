@@ -87,7 +87,7 @@ var _ = Describe("ModelValidation Success/Failure Scenarios", Ordered, func() {
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				g.Expect(output).To(ContainSubstring("Verification failed with error"))
+				g.Expect(output).To(ContainSubstring("verification failed"))
 			}, 30*time.Second, 5*time.Second).Should(Succeed())
 
 			By("validation failure test completed successfully - webhook injection and " +
