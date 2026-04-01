@@ -158,7 +158,9 @@ var _ = BeforeSuite(func() {
 		RateLimitBurst:      1000,                  // Higher burst for tests
 		StatusUpdateTimeout: 5 * time.Second,       // Shorter timeout for tests
 	})
-	podWebhookHandler := NewPodInterceptor(mgr.GetClient(), decoder)
+	// Use native sidecar support=true since envtest uses modern K8s binaries.
+	// Legacy sidecar behavior is tested separately via unit tests.
+	podWebhookHandler := NewPodInterceptor(mgr.GetClient(), decoder, true)
 	mgr.GetWebhookServer().Register("/mutate-v1-pod", &admission.Webhook{
 		Handler: podWebhookHandler,
 	})

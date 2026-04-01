@@ -281,8 +281,15 @@ func main() {
 	}
 
 	if !disableWebhook {
+		nativeSidecarSupport, err := webhooks.NativeSidecarSupport(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "failed to detect native sidecar support, assuming not supported")
+			nativeSidecarSupport = false
+		}
+		setupLog.Info("Kubernetes sidecar support detected", "nativeSidecars", nativeSidecarSupport)
+
 		decoder := admission.NewDecoder(mgr.GetScheme())
-		interceptor := webhooks.NewPodInterceptor(mgr.GetClient(), decoder)
+		interceptor := webhooks.NewPodInterceptor(mgr.GetClient(), decoder, nativeSidecarSupport)
 		mgr.GetWebhookServer().Register("/mutate-v1-pod", &admission.Webhook{
 			Handler: interceptor,
 		})

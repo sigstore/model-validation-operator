@@ -18,6 +18,10 @@ package constants
 const (
 	// ModelValidationInitContainerName is the name of the init container injected for model validation
 	ModelValidationInitContainerName = "model-validation"
+
+	// ModelValidationSidecarContainerName is the name of the regular sidecar container
+	// used for continuous validation on clusters that don't support native sidecars (pre-1.28)
+	ModelValidationSidecarContainerName = "model-validation-sidecar"
 )
 
 var (

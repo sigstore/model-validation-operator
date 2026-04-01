@@ -33,15 +33,18 @@ var (
 func main() {
 	var interval time.Duration
 	var healthPort int
+	var skipInitial bool
 
 	flag.DurationVar(&interval, "interval", 0, "Validation interval (e.g., 5m, 1h). If 0 or not set, runs once and exits.")
 	flag.IntVar(&healthPort, "health-port", 8080, "Health check server port")
+	flag.BoolVar(&skipInitial, "skip-initial", false,
+		"Skip initial validation (used with legacy sidecar mode where init container already validated)")
 	flag.Parse()
 
 	log.SetLogger(zap.New())
 	logger := log.Log.WithName("validation-agent")
 
-	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort)
+	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort, "skipInitial", skipInitial)
 
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -72,18 +75,23 @@ func main() {
 	// Validation args are remaining flags (passed to model-transparency-cli)
 	validationArgs := flag.Args()
 
-	// Run initial validation
-	logger.Info("Running initial validation")
-	if err := runValidation(ctx, validationArgs, logger, "initial"); err != nil {
-		logger.Error(err, "Initial validation failed")
-		if interval == 0 {
-			// One-shot mode: exit with error
-			os.Exit(1)
-		}
-		// Continuous mode: don't mark ready, but continue (will retry)
-	} else {
-		logger.Info("Initial validation successful")
+	// Run initial validation (unless skipped for legacy sidecar mode)
+	if skipInitial {
+		logger.Info("Skipping initial validation (init container already validated)")
 		markReady()
+	} else {
+		logger.Info("Running initial validation")
+		if err := runValidation(ctx, validationArgs, logger, "initial"); err != nil {
+			logger.Error(err, "Initial validation failed")
+			if interval == 0 {
+				// One-shot mode: exit with error
+				os.Exit(1)
+			}
+			// Continuous mode: don't mark ready, but continue (will retry)
+		} else {
+			logger.Info("Initial validation successful")
+			markReady()
+		}
 	}
 
 	// Continuous validation loop

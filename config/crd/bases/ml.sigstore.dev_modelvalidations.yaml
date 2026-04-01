@@ -128,15 +128,15 @@ spec:
               continuousValidation:
                 description: |-
                   ContinuousValidation enables periodic re-validation of the model.
-                  When enabled, the init container becomes a native sidecar.
-                  Requires Kubernetes 1.28+ with SidecarContainers feature gate enabled, or 1.29+ (enabled by default).
+                  On Kubernetes 1.28+, uses a native sidecar. On older clusters, falls back to
+                  a traditional sidecar container alongside a one-shot init container.
                 properties:
                   enabled:
                     default: false
                     description: |-
                       Enabled controls whether continuous validation is active.
-                      When true, the validation container runs as a native sidecar with restartPolicy: Always.
-                      When false (default), the validation container runs as a standard init container.
+                      When true, the validation container periodically re-validates the model.
+                      When false (default), the validation container runs as a standard init container (one-shot).
                     type: boolean
                   interval:
                     default: 5m
