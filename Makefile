@@ -123,8 +123,12 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet setup-envtest test-tracing ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+
+.PHONY: test-tracing
+test-tracing: ## Run tracing package tests.
+	cd pkg/tracing && go test ./...
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

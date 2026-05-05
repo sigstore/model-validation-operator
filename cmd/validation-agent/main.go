@@ -16,6 +16,11 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sigstore/model-validation-operator/internal/validation"
+	"github.com/sigstore/model-validation-operator/pkg/tracing"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -42,6 +47,21 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	shutdownTracing, err := tracing.SetupTracing(ctx,
+		tracing.WithServiceName("validation-agent"),
+	)
+	if err != nil {
+		logger.Error(err, "Failed to initialize tracing, continuing without it")
+		shutdownTracing = func(context.Context) error { return nil }
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			logger.Error(err, "Failed to shutdown tracing")
+		}
+	}()
+
 	// Start health server with graceful shutdown support
 	healthServerDone := make(chan struct{})
 	go func() {
@@ -54,7 +74,7 @@ func main() {
 
 	// Run initial validation
 	logger.Info("Running initial validation")
-	if err := runValidation(ctx, validationArgs, logger); err != nil {
+	if err := runValidation(ctx, validationArgs, logger, "initial"); err != nil {
 		logger.Error(err, "Initial validation failed")
 		if interval == 0 {
 			// One-shot mode: exit with error
@@ -76,7 +96,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				logger.Info("Running periodic validation")
-				if err := runValidation(ctx, validationArgs, logger); err != nil {
+				if err := runValidation(ctx, validationArgs, logger, "periodic"); err != nil {
 					logger.Error(err, "Validation failed")
 					// Don't unmark ready - once ready, stay ready
 					// This allows the pod to continue running despite transient failures
@@ -98,12 +118,33 @@ func main() {
 	// Exit code 0 (success already handled, failures exit earlier at line 52)
 }
 
-func runValidation(ctx context.Context, args []string, logger logr.Logger) error {
+func runValidation(ctx context.Context, args []string, logger logr.Logger, validationType string) error {
+	tracer := otel.Tracer("validation-agent")
+	ctx, span := tracer.Start(ctx, "model.validate",
+		trace.WithAttributes(attribute.String("validation.type", validationType)),
+	)
+	defer span.End()
+
 	cfg, err := validation.ParseArgs(args)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to parse validation args")
 		return fmt.Errorf("failed to parse validation args: %w", err)
 	}
-	return validation.Validate(ctx, cfg, logger)
+
+	span.SetAttributes(
+		attribute.String("validation.method", cfg.Method),
+		attribute.String("validation.model_path", cfg.ModelPath),
+	)
+
+	if err := validation.Validate(ctx, cfg, logger); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	span.SetStatus(codes.Ok, "validation successful")
+	return nil
 }
 
 func startHealthServer(ctx context.Context, port int, logger logr.Logger) {

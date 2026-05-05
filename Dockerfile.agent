@@ -5,11 +5,13 @@ ARG TARGETARCH
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
+COPY pkg/tracing/go.mod pkg/tracing/go.sum ./pkg/tracing/
 RUN go mod download
 
 COPY cmd/validation-agent/ cmd/validation-agent/
 COPY internal/ internal/
 COPY api/ api/
+COPY pkg/ pkg/
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -a -o validation-agent cmd/validation-agent/main.go
