@@ -1,0 +1,18 @@
+apiVersion: ml.sigstore.dev/v1alpha1
+kind: TelemetryConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: model-validation-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: telemetryconfig-sample
+spec:
+  # Match all namespaces (empty selector = match all)
+  namespaceSelector: {}
+  # Match all ModelValidation CRs
+  selector: {}
+  tracing:
+    enabled: true
+    endpoint: "http://otel-collector.monitoring:4317"
+    insecure: true
+    sampler: "parentbased_traceidratio"
+    samplerArg: "0.1"
