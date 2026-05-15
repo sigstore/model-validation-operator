@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/ml.sigstore.dev_modelvalidations.yaml
+- bases/ml.sigstore.dev_telemetryconfigs.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

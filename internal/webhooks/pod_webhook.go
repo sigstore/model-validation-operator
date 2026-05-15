@@ -50,6 +50,7 @@ func NewPodInterceptor(c client.Client, decoder admission.Decoder) webhook.Admis
 // +kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,failurePolicy=fail,groups="",resources=pods,sideEffects=None,verbs=create;update,versions=v1,name=pods.validation.ml.sigstore.dev,admissionReviewVersions=v1
 
 // +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=ml.sigstore.dev,resources=telemetryconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
 // podInterceptor extends pods with Model Validation Init-Container if annotation is specified.
@@ -120,12 +121,17 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 	pp.Annotations[constants.AuthMethodAnnotationKey] = mv.GetAuthMethod()
 	pp.Annotations[constants.ConfigHashAnnotationKey] = mv.GetConfigHash()
 
+	tc, err := findMatchingTelemetryConfig(ctx, p.client, ns, mv)
+	if err != nil {
+		logger.Error(err, "failed to find TelemetryConfig, proceeding without telemetry")
+	}
+
 	vm := []corev1.VolumeMount{}
 	for _, c := range pod.Spec.Containers {
 		vm = append(vm, c.VolumeMounts...)
 	}
 
-	container := buildValidationContainer(mv, args, vm, pp)
+	container := buildValidationContainer(mv, args, vm, pp, tc)
 	pp.Spec.InitContainers = append(pp.Spec.InitContainers, container)
 
 	marshaledPod, err := json.Marshal(pp)
@@ -137,9 +143,11 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 }
 
 // buildValidationContainer constructs the validation container with appropriate configuration
-// for either one-shot or continuous validation based on ModelValidation spec
+// for either one-shot or continuous validation based on ModelValidation spec.
+// If a TelemetryConfig is provided, OTEL_* environment variables are injected.
 func buildValidationContainer(
 	mv *v1alpha1.ModelValidation, args []string, vm []corev1.VolumeMount, pp *corev1.Pod,
+	tc *v1alpha1.TelemetryConfig,
 ) corev1.Container {
 	// Determine image pull policy
 	imagePullPolicy := corev1.PullAlways
@@ -214,6 +222,11 @@ func buildValidationContainer(
 				corev1.ResourceMemory: resource.MustParse("512Mi"),
 			},
 		}
+	}
+
+	// Inject telemetry env vars if a TelemetryConfig matched
+	if envs := telemetryEnvVars(tc); len(envs) > 0 {
+		container.Env = append(container.Env, envs...)
 	}
 
 	return container

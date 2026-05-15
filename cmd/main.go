@@ -318,6 +318,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	tcReconciler := &controller.TelemetryConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err := tcReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create TelemetryConfig controller")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
