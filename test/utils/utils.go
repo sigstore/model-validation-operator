@@ -345,6 +345,17 @@ func HasValidationContainer(pod *corev1.Pod) bool {
 	return false
 }
 
+// HasValidationSidecar checks if a pod has the model-validation-sidecar
+// regular container (used for legacy continuous validation on pre-1.28 clusters)
+func HasValidationSidecar(pod *corev1.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		if container.Name == "model-validation-sidecar" {
+			return true
+		}
+	}
+	return false
+}
+
 // CreateServiceAccountToken creates a token for the specified service account in the given namespace
 func CreateServiceAccountToken(serviceAccountName, namespace string) (string, error) {
 	tokenCmd := exec.Command("kubectl", "create", "token", serviceAccountName, "-n", namespace)

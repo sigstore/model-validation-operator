@@ -31,5 +31,10 @@ var podTemplate []byte
 //go:embed testdata/curl_metrics_pod_template.yaml
 var curlPodTemplate []byte
 
+// ModelValidation CR template with continuous validation enabled
+//
+//go:embed testdata/modelvalidation_continuous_template.yaml
+var modelValidationContinuousTemplate []byte
+
 //go:embed testdata/clusterrolebinding_template.yaml
 var clusterRoleBindingTemplate []byte

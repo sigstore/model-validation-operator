@@ -38,11 +38,16 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-// NewPodInterceptor creates a new pod mutating webhook to be registered
-func NewPodInterceptor(c client.Client, decoder admission.Decoder) webhook.AdmissionHandler {
+// NewPodInterceptor creates a new pod mutating webhook to be registered.
+// nativeSidecarSupport indicates whether the cluster supports native sidecars
+// (init containers with restartPolicy: Always, available in Kubernetes 1.28+).
+// When false, continuous validation falls back to injecting a traditional sidecar
+// container alongside a one-shot init container.
+func NewPodInterceptor(c client.Client, decoder admission.Decoder, nativeSidecarSupport bool) webhook.AdmissionHandler {
 	return &podInterceptor{
-		client:  c,
-		decoder: decoder,
+		client:               c,
+		decoder:              decoder,
+		nativeSidecarSupport: nativeSidecarSupport,
 	}
 }
 
@@ -55,8 +60,9 @@ func NewPodInterceptor(c client.Client, decoder admission.Decoder) webhook.Admis
 
 // podInterceptor extends pods with Model Validation Init-Container if annotation is specified.
 type podInterceptor struct {
-	client  client.Client
-	decoder admission.Decoder
+	client               client.Client
+	decoder              admission.Decoder
+	nativeSidecarSupport bool
 }
 
 // Handle extends pods with Model Validation Init-Container if annotation is specified.
@@ -104,6 +110,11 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 			return admission.Allowed("validation exists, no action needed")
 		}
 	}
+	for _, c := range pod.Spec.Containers {
+		if c.Name == constants.ModelValidationSidecarContainerName {
+			return admission.Allowed("validation exists, no action needed")
+		}
+	}
 
 	mergedModel := mergeModelWithAnnotations(logger, mv.Spec.Model, pod.Annotations)
 
@@ -131,8 +142,22 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 		vm = append(vm, c.VolumeMounts...)
 	}
 
-	container := buildValidationContainer(mv, args, vm, pp, tc)
+	continuousEnabled := mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Enabled
+	useLegacySidecar := continuousEnabled && !p.nativeSidecarSupport
+
+	if useLegacySidecar {
+		logger.Info("Using legacy sidecar for continuous validation (native sidecars not supported)")
+	}
+
+	container := buildValidationContainer(mv, args, vm, pp, tc, p.nativeSidecarSupport)
 	pp.Spec.InitContainers = append(pp.Spec.InitContainers, container)
+
+	// On pre-1.28 clusters with continuous validation, inject a traditional sidecar
+	// container alongside the init container for periodic re-validation.
+	if useLegacySidecar {
+		sidecar := buildLegacySidecarContainer(mv, args, vm, pp)
+		pp.Spec.Containers = append(pp.Spec.Containers, sidecar)
+	}
 
 	marshaledPod, err := json.Marshal(pp)
 	if err != nil {
@@ -142,12 +167,9 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admi
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
 }
 
-// buildValidationContainer constructs the validation container with appropriate configuration
-// for either one-shot or continuous validation based on ModelValidation spec.
-// If a TelemetryConfig is provided, OTEL_* environment variables are injected.
 func buildValidationContainer(
 	mv *v1alpha1.ModelValidation, args []string, vm []corev1.VolumeMount, pp *corev1.Pod,
-	tc *v1alpha1.TelemetryConfig,
+	tc *v1alpha1.TelemetryConfig, nativeSidecarSupport bool,
 ) corev1.Container {
 	// Determine image pull policy
 	imagePullPolicy := corev1.PullAlways
@@ -164,8 +186,9 @@ func buildValidationContainer(
 		VolumeMounts:    vm,
 	}
 
-	// Add continuous validation configuration if enabled
-	if mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Enabled {
+	// Add continuous validation configuration if enabled AND native sidecars are supported
+	continuousEnabled := mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Enabled
+	if continuousEnabled && nativeSidecarSupport {
 		interval := "5m"
 		if mv.Spec.ContinuousValidation.Interval != "" {
 			interval = mv.Spec.ContinuousValidation.Interval
@@ -200,8 +223,10 @@ func buildValidationContainer(
 			InitialDelaySeconds: 10,
 			PeriodSeconds:       30,
 		}
+	}
 
-		// Add annotation to track continuous validation (for informational/tracking purposes)
+	// Track continuous validation in annotations regardless of sidecar mode
+	if continuousEnabled {
 		if pp.Annotations == nil {
 			pp.Annotations = make(map[string]string)
 		}
@@ -227,6 +252,79 @@ func buildValidationContainer(
 	// Inject telemetry env vars if a TelemetryConfig matched
 	if envs := telemetryEnvVars(tc); len(envs) > 0 {
 		container.Env = append(container.Env, envs...)
+	}
+
+	return container
+}
+
+// buildLegacySidecarContainer constructs a traditional sidecar container for
+// continuous validation on clusters that don't support native sidecars (pre-1.28).
+// This container runs alongside the application containers and periodically
+// re-validates the model. The init container (built by buildValidationContainer)
+// handles the initial one-shot validation to block pod startup.
+func buildLegacySidecarContainer(
+	mv *v1alpha1.ModelValidation, args []string, vm []corev1.VolumeMount, _ *corev1.Pod,
+) corev1.Container {
+	imagePullPolicy := corev1.PullAlways
+	if mv.Spec.ImagePullPolicy != "" {
+		imagePullPolicy = mv.Spec.ImagePullPolicy
+	}
+
+	interval := "5m"
+	if mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Interval != "" {
+		interval = mv.Spec.ContinuousValidation.Interval
+	}
+
+	// Prepend interval flag and --skip-initial to args.
+	// --skip-initial tells the agent to skip initial validation since the
+	// init container already performed it.
+	sidecarArgs := append([]string{"--interval=" + interval, "--skip-initial"}, args...)
+
+	container := corev1.Container{
+		Name:            constants.ModelValidationSidecarContainerName,
+		Image:           constants.ModelValidationAgentImage,
+		ImagePullPolicy: imagePullPolicy,
+		Command:         []string{"/usr/local/bin/validation-agent"},
+		Args:            sidecarArgs,
+		VolumeMounts:    vm,
+		// Add readiness probe (ready immediately since init container already validated)
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/ready",
+					Port: intstr.FromInt(8080),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		// Add liveness probe
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt(8080),
+				},
+			},
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       30,
+		},
+	}
+
+	// Apply resource requirements
+	if mv.Spec.Resources != nil {
+		container.Resources = *mv.Spec.Resources
+	} else {
+		container.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+		}
 	}
 
 	return container

@@ -29,3 +29,14 @@ func StringFlagOrEnv(p *string, name string, envName string, defaultValue string
 	}
 	flag.StringVar(p, name, defaultValue, usage)
 }
+
+// BoolFlagOrEnv defines a bool flag which can be set by an environment variable.
+// Precedence: flag > env var > default value.
+// The env var is considered true if set to "true", "1", or "yes" (case-insensitive).
+func BoolFlagOrEnv(p *bool, name string, envName string, defaultValue bool, usage string) {
+	envValue := os.Getenv(envName)
+	if envValue == "true" || envValue == "1" || envValue == "yes" {
+		defaultValue = true
+	}
+	flag.BoolVar(p, name, defaultValue, usage)
+}

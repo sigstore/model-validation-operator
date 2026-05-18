@@ -80,6 +80,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var disableWebhook bool
+	var forceLegacySidecar bool
 	var tlsOpts []func(*tls.Config)
 
 	// Status tracker configuration
@@ -108,6 +109,9 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&disableWebhook, "disable-webhook", false,
 		"Disable the webhook server for development environments without certificates.")
+	utils.BoolFlagOrEnv(&forceLegacySidecar, "force-legacy-sidecar",
+		"FORCE_LEGACY_SIDECAR", false,
+		"Force legacy sidecar mode for continuous validation, even on clusters that support native sidecars.")
 	utils.StringFlagOrEnv(&constants.ModelValidationAgentImage,
 		"validation-agent-image",
 		"VALIDATION_AGENT_IMAGE",
@@ -281,8 +285,19 @@ func main() {
 	}
 
 	if !disableWebhook {
+		nativeSidecarSupport, err := webhooks.NativeSidecarSupport(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "failed to detect native sidecar support, assuming not supported")
+			nativeSidecarSupport = false
+		}
+		if forceLegacySidecar {
+			setupLog.Info("Forcing legacy sidecar mode (--force-legacy-sidecar is set)")
+			nativeSidecarSupport = false
+		}
+		setupLog.Info("Kubernetes sidecar support", "nativeSidecars", nativeSidecarSupport)
+
 		decoder := admission.NewDecoder(mgr.GetScheme())
-		interceptor := webhooks.NewPodInterceptor(mgr.GetClient(), decoder)
+		interceptor := webhooks.NewPodInterceptor(mgr.GetClient(), decoder, nativeSidecarSupport)
 		mgr.GetWebhookServer().Register("/mutate-v1-pod", &admission.Webhook{
 			Handler: interceptor,
 		})

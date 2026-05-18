@@ -116,14 +116,15 @@ type ValidationConfig struct {
 }
 
 // ContinuousValidation defines the configuration for continuous model validation.
-// When enabled, the validation container runs as a native sidecar with restartPolicy: Always,
-// allowing periodic re-validation of the model.
-// Note: Native sidecar support requires Kubernetes 1.28+ with the feature explicitly enabled,
-// or Kubernetes 1.29+ where it is enabled by default.
+// When enabled, the validation container periodically re-validates the model.
+// On Kubernetes 1.28+ (with SidecarContainers feature gate) or 1.29+ (enabled by default),
+// this uses a native sidecar (init container with restartPolicy: Always).
+// On older clusters, the operator falls back to injecting a one-shot init container
+// for initial validation plus a traditional sidecar container for periodic re-validation.
 type ContinuousValidation struct {
 	// Enabled controls whether continuous validation is active.
-	// When true, the validation container runs as a native sidecar with restartPolicy: Always.
-	// When false (default), the validation container runs as a standard init container.
+	// When true, the validation container periodically re-validates the model.
+	// When false (default), the validation container runs as a standard init container (one-shot).
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 
@@ -154,8 +155,8 @@ type ModelValidationSpec struct {
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
 	// ContinuousValidation enables periodic re-validation of the model.
-	// When enabled, the init container becomes a native sidecar.
-	// Requires Kubernetes 1.28+ with SidecarContainers feature gate enabled, or 1.29+ (enabled by default).
+	// On Kubernetes 1.28+, uses a native sidecar. On older clusters, falls back to
+	// a traditional sidecar container alongside a one-shot init container.
 	// +kubebuilder:validation:Optional
 	ContinuousValidation *ContinuousValidation `json:"continuousValidation,omitempty"`
 
