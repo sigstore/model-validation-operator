@@ -36,7 +36,7 @@ IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
 # AGENT_IMG defines the image:tag used for the validation agent.
 # This is injected into the operator binary via ldflags at build time.
-AGENT_IMG ?= ghcr.io/sigstore/model-validation-agent:v0.1.0
+AGENT_IMG ?= $(IMAGE_TAG_BASE)-agent:v$(VERSION)
 
 # LDFLAGS to inject the agent image into the operator binary
 LDFLAGS := -X github.com/sigstore/model-validation-operator/internal/constants.ModelValidationAgentImage=$(AGENT_IMG)
@@ -355,7 +355,7 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	# Fix webhook configuration in CSV
 	@if [ -f bundle/manifests/model-validation-operator.clusterserviceversion.yaml ]; then \
 		sed -i.bak 's/deploymentName: webhook/deploymentName: model-validation-controller-manager/' bundle/manifests/model-validation-operator.clusterserviceversion.yaml && \
-		sed -i.bak2 's/deploymentName: model-validation-controller-manager/deploymentName: model-validation-controller-manager\n    serviceName: model-validation-webhook/' bundle/manifests/model-validation-operator.clusterserviceversion.yaml && \
+		sed -i.bak2 's/deploymentName: model-validation-controller-manager/deploymentName: model-validation-controller-manager\n    containerPort: 9443\n    serviceName: model-validation-webhook/' bundle/manifests/model-validation-operator.clusterserviceversion.yaml && \
 		rm -f bundle/manifests/model-validation-operator.clusterserviceversion.yaml.bak bundle/manifests/model-validation-operator.clusterserviceversion.yaml.bak2; \
 	fi
 	$(OPERATOR_SDK) bundle validate ./bundle
@@ -528,14 +528,15 @@ e2e-build-agent-image:
 e2e-load-images: e2e-build-image e2e-build-agent-image e2e-build-test-model
 	@echo "Pulling model-transparency-cli image..."
 	$(CONTAINER_TOOL) pull $(MODEL_TRANSPARENCY_IMG)
-	@echo "Loading manager image into Kind cluster..."
-	$(KIND) load docker-image -n $(KIND_CLUSTER) $(IMG)
-	@echo "Loading agent image into Kind cluster..."
-	$(KIND) load docker-image -n $(KIND_CLUSTER) $(AGENT_IMG)
-	@echo "Loading model-transparency-cli image into Kind cluster..."
-	$(KIND) load docker-image -n $(KIND_CLUSTER) $(MODEL_TRANSPARENCY_IMG)
-	@echo "Loading test model image into Kind cluster..."
-	$(KIND) load docker-image -n $(KIND_CLUSTER) $(E2E_TEST_MODEL)
+	@echo "Loading images into Kind cluster..."
+	$(CONTAINER_TOOL) save $(IMG) -o /tmp/operator-oci.tar
+	$(CONTAINER_TOOL) save $(AGENT_IMG) -o /tmp/agent-oci.tar
+	$(CONTAINER_TOOL) save $(MODEL_TRANSPARENCY_IMG) -o /tmp/model-transparency-oci.tar
+	$(CONTAINER_TOOL) save $(E2E_TEST_MODEL) -o /tmp/test-model-oci.tar
+	$(KIND) load image-archive /tmp/operator-oci.tar -n $(KIND_CLUSTER)
+	$(KIND) load image-archive /tmp/agent-oci.tar -n $(KIND_CLUSTER)
+	$(KIND) load image-archive /tmp/model-transparency-oci.tar -n $(KIND_CLUSTER)
+	$(KIND) load image-archive /tmp/test-model-oci.tar -n $(KIND_CLUSTER)
 
 # Setup test environment (namespaces, local models on kind cluster, operator)
 
@@ -608,4 +609,35 @@ test-e2e-full: manifests generate fmt vet e2e-setup ## Run e2e tests with setup 
 test-e2e-ci: manifests generate fmt vet e2e-setup ## Run the e2e tests, with setup.  No teardown as the CI workflow will throw away kind
 	@echo "Running e2e tests with infrastructure setup for CI..."
 	go test ./test/e2e/ -v -ginkgo.v
+
+##@ OLM E2E Test Infrastructure
+
+# OLM E2E Variables
+OLM_NAMESPACE ?= $(shell $(KUBECTL) get ns openshift-operator-lifecycle-manager --no-headers >/dev/null 2>&1 && echo openshift-operator-lifecycle-manager || echo olm)
+OLM_CHANNEL ?= tech-preview
+OLM_PACKAGE ?= model-validation-operator
+
+.PHONY: e2e-install-olm
+e2e-install-olm: operator-sdk ## Install OLM on the cluster
+	@echo "Installing OLM..."
+	$(OPERATOR_SDK) olm install --timeout 5m || echo "OLM may already be installed"
+
+.PHONY: e2e-uninstall-olm
+e2e-uninstall-olm: operator-sdk ## Uninstall OLM from the cluster
+	$(OPERATOR_SDK) olm uninstall
+
+.PHONY: e2e-olm-teardown
+e2e-olm-teardown: ## Tear down OLM e2e test environment
+	@echo "Tearing down OLM e2e test environment..."
+	-$(KUBECTL) delete subscription --all -n $(E2E_OPERATOR_NAMESPACE) --timeout=30s
+	-$(KUBECTL) delete csv --all -n $(E2E_OPERATOR_NAMESPACE) --timeout=60s
+	-$(KUBECTL) delete operatorgroup --all -n $(E2E_OPERATOR_NAMESPACE) --timeout=30s
+	-$(KUBECTL) delete catalogsource model-validation-test-catalog -n $(OLM_NAMESPACE) --timeout=30s --ignore-not-found=true
+	-$(KUBECTL) delete pods --all -n $(E2E_TEST_NAMESPACE) --timeout=30s
+	-$(KUBECTL) delete modelvalidations --all -n $(E2E_TEST_NAMESPACE) --timeout=30s
+
+.PHONY: test-e2e-olm
+test-e2e-olm: manifests generate fmt vet ## Run OLM upgrade e2e tests
+	@echo "Running OLM upgrade e2e tests..."
+	go test ./test/e2e-olm/ -v -ginkgo.v -timeout 20m
 

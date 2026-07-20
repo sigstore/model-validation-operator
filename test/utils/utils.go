@@ -95,6 +95,29 @@ type ClusterRoleBindingTemplateData struct {
 	ClusterRoleName    string
 }
 
+// CatalogSourceTemplateData represents template data for OLM CatalogSource
+type CatalogSourceTemplateData struct {
+	Name      string
+	Namespace string
+	Image     string
+}
+
+// OperatorGroupTemplateData represents template data for OLM OperatorGroup
+type OperatorGroupTemplateData struct {
+	Name      string
+	Namespace string
+}
+
+// SubscriptionTemplateData represents template data for OLM Subscription
+type SubscriptionTemplateData struct {
+	Name                   string
+	Namespace              string
+	Channel                string
+	PackageName            string
+	CatalogSourceName      string
+	CatalogSourceNamespace string
+}
+
 // Run executes the provided command within this context
 func Run(cmd *exec.Cmd) (string, error) {
 	dir, _ := GetProjectDir()
@@ -136,7 +159,9 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, err
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+	if idx := strings.LastIndex(wd, "/test/"); idx != -1 {
+		wd = wd[:idx]
+	}
 	return wd, nil
 }
 
@@ -316,6 +341,19 @@ func GetMetricsOutput(namespace, podName string) string {
 		return ""
 	}
 	return output
+}
+
+// KubectlPatch patches a Kubernetes resource
+func KubectlPatch(resource, name, namespace, patchType, patch string) error {
+	args := []string{"patch", resource, name}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	args = append(args, "--type", patchType, "-p", patch)
+
+	cmd := exec.Command("kubectl", args...)
+	_, err := Run(cmd)
+	return err
 }
 
 // KubectlDescribe describes a Kubernetes resource
