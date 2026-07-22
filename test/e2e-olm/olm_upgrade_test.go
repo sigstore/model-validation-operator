@@ -192,6 +192,18 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 	})
 
 	It("should upgrade when the catalog is updated", func() {
+		By("capturing the pre-upgrade controller image")
+		var preUpgradeImage string
+		Eventually(func(g Gomega) {
+			img, err := utils.KubectlGet("deployment", "model-validation-controller-manager",
+				operatorNamespace,
+				"jsonpath={.spec.template.spec.containers[?(@.name==\"manager\")].image}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(img).NotTo(BeEmpty())
+			preUpgradeImage = img
+		}, 1*time.Minute, 5*time.Second).Should(Succeed())
+		_, _ = fmt.Fprintf(GinkgoWriter, "  Pre-upgrade image: %s\n", preUpgradeImage)
+
 		By(fmt.Sprintf("patching CatalogSource to use target catalog: %s", targetCatalogImage))
 		err := utils.KubectlPatch("catalogsource", catalogName, olmNamespace, "merge",
 			fmt.Sprintf(`{"spec":{"image":"%s"}}`, targetCatalogImage))
@@ -237,6 +249,18 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 				operatorNamespace, "condition=Available", "30s")
 		}, 3*time.Minute, 10*time.Second).Should(Succeed(),
 			"Controller deployment should be available after upgrade")
+
+		By("verifying the controller image changed after upgrade")
+		Eventually(func(g Gomega) {
+			img, err := utils.KubectlGet("deployment", "model-validation-controller-manager",
+				operatorNamespace,
+				"jsonpath={.spec.template.spec.containers[?(@.name==\"manager\")].image}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(img).NotTo(BeEmpty())
+			g.Expect(img).NotTo(Equal(preUpgradeImage),
+				"Controller image should change after upgrade")
+		}, 2*time.Minute, 5*time.Second).Should(Succeed(),
+			"Controller deployment image should be updated")
 	})
 
 	It("should maintain functionality after upgrade", func() {
@@ -272,6 +296,17 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 				Equal(constants.ModelValidationInitContainerName))
 		}, 1*time.Minute, 5*time.Second).Should(Succeed(),
 			"Init container should be injected after upgrade")
+	})
+
+	It("should allow CR deletion after upgrade", func() {
+		By("deleting the ModelValidation CR")
+		cleanupResource("modelvalidation", testModelName, webhookTestNamespace)
+
+		By("verifying the ModelValidation CR is deleted")
+		Eventually(func() bool {
+			return utils.KubectlResourceExists("modelvalidation", testModelName, webhookTestNamespace)
+		}, 1*time.Minute, 5*time.Second).Should(BeFalse(),
+			"ModelValidation CR should be deleted after upgrade")
 	})
 
 })
