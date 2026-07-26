@@ -9,6 +9,7 @@ components:
 - ../../components/certmanager
 - ../../components/metrics-port
 - ../../components/webhook-replacements
+- ../../components/service-monitor
 
 namespace: model-validation-operator-system
 

@@ -3,8 +3,10 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	"github.com/sigstore/model-validation-operator/internal/tracker"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -29,7 +31,12 @@ type PodReconciler struct {
 // +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations/status,verbs=update
 
 // Reconcile handles pod events to update ModelValidation status
-func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.RecordReconcile(ctx, "pod", reconcileResult(err), time.Since(start))
+	}()
+
 	logger := log.FromContext(ctx)
 
 	pod := &corev1.Pod{}
