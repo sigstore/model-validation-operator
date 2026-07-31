@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,7 +67,12 @@ type podInterceptor struct {
 }
 
 // Handle extends pods with Model Validation Init-Container if annotation is specified.
-func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) admission.Response {
+func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) (resp admission.Response) {
+	start := time.Now()
+	defer func() {
+		metrics.RecordWebhookMutation(ctx, req.Namespace, webhookResult(resp), time.Since(start))
+	}()
+
 	logger := log.FromContext(ctx)
 	logger.Info("Execute webhook")
 	pod := &corev1.Pod{}
@@ -443,4 +449,18 @@ func mergeModelWithAnnotations(logger logr.Logger, model v1alpha1.Model, annotat
 	}
 
 	return *merged
+}
+
+func webhookResult(resp admission.Response) string {
+	if resp.Result == nil {
+		return "success"
+	}
+	code := resp.Result.Code
+	if code >= 200 && code < 300 {
+		if resp.PatchType != nil {
+			return "success"
+		}
+		return "skipped"
+	}
+	return "error"
 }

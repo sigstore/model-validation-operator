@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,12 @@ type TelemetryConfigReconciler struct {
 // +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations,verbs=get;list;watch
 
 // Reconcile evaluates selectors and updates matched counts in status.
-func (r *TelemetryConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TelemetryConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.RecordReconcile(ctx, "telemetryconfig", reconcileResult(err), time.Since(start))
+	}()
+
 	logger := log.FromContext(ctx)
 
 	tc := &v1alpha1.TelemetryConfig{}

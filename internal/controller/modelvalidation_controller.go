@@ -3,8 +3,10 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
 	"github.com/sigstore/model-validation-operator/internal/tracker"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -25,7 +27,12 @@ type ModelValidationReconciler struct {
 // +kubebuilder:rbac:groups=ml.sigstore.dev,resources=modelvalidations/status,verbs=update
 
 // Reconcile handles ModelValidation events to track creation/updates/deletion
-func (r *ModelValidationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ModelValidationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.RecordReconcile(ctx, "modelvalidation", reconcileResult(err), time.Since(start))
+	}()
+
 	logger := log.FromContext(ctx)
 
 	mv := &v1alpha1.ModelValidation{}

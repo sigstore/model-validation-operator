@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
 	"github.com/sigstore/model-validation-operator/internal/controller"
+	"github.com/sigstore/model-validation-operator/internal/metrics"
+	"github.com/sigstore/model-validation-operator/internal/servicemonitor"
 	"github.com/sigstore/model-validation-operator/internal/tracker"
 	"github.com/sigstore/model-validation-operator/internal/utils"
 	"github.com/sigstore/model-validation-operator/internal/webhooks"
@@ -33,6 +36,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -67,6 +71,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(mlv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(monitoringv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -81,6 +86,7 @@ func main() {
 	var enableHTTP2 bool
 	var disableWebhook bool
 	var forceLegacySidecar bool
+	var enableServiceMonitor bool
 	var tlsOpts []func(*tls.Config)
 
 	// Status tracker configuration
@@ -117,6 +123,9 @@ func main() {
 		"VALIDATION_AGENT_IMAGE",
 		constants.ModelValidationAgentImage,
 		"Validation agent image to be used.")
+	utils.BoolFlagOrEnv(&enableServiceMonitor, "enable-service-monitor",
+		"ENABLE_SERVICE_MONITOR", false,
+		"Automatically create a Prometheus ServiceMonitor for the operator metrics endpoint.")
 
 	// Status tracker configuration flags
 	flag.DurationVar(&debounceDuration, "debounce-duration", defaultDebounceDuration,
@@ -138,6 +147,17 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	otelShutdown, err := metrics.SetupOTelMetrics()
+	if err != nil {
+		setupLog.Error(err, "unable to set up OTel metrics")
+		os.Exit(1)
+	}
+	defer func() {
+		if err := otelShutdown(context.Background()); err != nil {
+			setupLog.Error(err, "error shutting down OTel metrics")
+		}
+	}()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -271,6 +291,19 @@ func main() {
 		setupLog.Info("Adding webhook certificate watcher to manager")
 		if err := mgr.Add(webhookCertWatcher); err != nil {
 			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
+			os.Exit(1)
+		}
+	}
+
+	if enableServiceMonitor {
+		smCreator := servicemonitor.NewCreator(mgr.GetClient(), mgr.GetConfig(), servicemonitor.Options{
+			Namespace: os.Getenv("POD_NAMESPACE"),
+			PortName:  "https",
+			Path:      "/metrics",
+			Secure:    secureMetrics,
+		})
+		if err := mgr.Add(smCreator); err != nil {
+			setupLog.Error(err, "unable to add ServiceMonitor creator")
 			os.Exit(1)
 		}
 	}
