@@ -127,7 +127,7 @@ func TestContinuousValidationLoop_RevokesReadinessOnTick(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		continuousValidationLoop(ctx, tick, 1, func() error {
+		continuousValidationLoop(ctx, tick, nil, 1, func(string) error {
 			return errors.New("boom")
 		}, logr.Discard())
 		close(done)
@@ -153,7 +153,7 @@ func TestContinuousValidationLoop_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		continuousValidationLoop(ctx, make(chan time.Time), 1, func() error {
+		continuousValidationLoop(ctx, make(chan time.Time), nil, 1, func(string) error {
 			t.Error("validate must not be called when no tick fires")
 			return nil
 		}, logr.Discard())

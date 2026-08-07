@@ -153,6 +153,19 @@ type ContinuousValidation struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Optional
 	FailureThreshold int32 `json:"failureThreshold"`
+
+	// Watch enables filesystem event-based re-validation using inotify.
+	// When true, the agent watches the model path for file changes and
+	// triggers re-validation on create/write/remove events (with debounce).
+	// The interval-based polling still runs as a fallback.
+	//
+	// Supported: local and block-backed storage (NVMe, SSD, HDD, iSCSI,
+	// Ceph RBD, local PVs, emptyDir, hostPath).
+	// Not supported: network filesystems (NFS, CIFS/SMB, GlusterFS) where
+	// the kernel does not generate inotify events for remote writes.
+	//
+	// +kubebuilder:default=false
+	Watch bool `json:"watch,omitempty"`
 }
 
 // ModelValidationSpec defines the desired state of ModelValidation
@@ -279,6 +292,9 @@ func (mv *ModelValidation) GetConfigHash() string {
 			hasher.Write([]byte(mv.Spec.ContinuousValidation.Interval))
 			hasher.Write([]byte("failure-threshold:" +
 				strconv.Itoa(int(mv.Spec.ContinuousValidation.FailureThreshold))))
+			if mv.Spec.ContinuousValidation.Watch {
+				hasher.Write([]byte("watch-enabled"))
+			}
 		} else {
 			hasher.Write([]byte("continuous-disabled"))
 		}
