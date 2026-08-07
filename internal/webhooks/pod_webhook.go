@@ -203,8 +203,12 @@ func buildValidationContainer(
 		// Make it a native sidecar with restartPolicy: Always
 		container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)
 
-		// Prepend interval flag to args
-		container.Args = append([]string{"--interval=" + interval}, args...)
+		// Prepend flags to args
+		flags := []string{"--interval=" + interval}
+		if mv.Spec.ContinuousValidation.Watch {
+			flags = append(flags, "--watch")
+		}
+		container.Args = append(flags, args...)
 
 		// Add readiness probe (ready after first successful validation)
 		container.ReadinessProbe = &corev1.Probe{
@@ -284,7 +288,11 @@ func buildLegacySidecarContainer(
 	// Prepend interval flag and --skip-initial to args.
 	// --skip-initial tells the agent to skip initial validation since the
 	// init container already performed it.
-	sidecarArgs := append([]string{"--interval=" + interval, "--skip-initial"}, args...)
+	sidecarFlags := []string{"--interval=" + interval, "--skip-initial"}
+	if mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Watch {
+		sidecarFlags = append(sidecarFlags, "--watch")
+	}
+	sidecarArgs := append(sidecarFlags, args...)
 
 	container := corev1.Container{
 		Name:            constants.ModelValidationSidecarContainerName,
