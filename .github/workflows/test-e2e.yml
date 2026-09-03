@@ -37,3 +37,138 @@ jobs:
       - name: Run E2E tests
         run: |
           make test-e2e-ci
+
+  test-e2e-olm-upgrade:
+    name: Test OLM upgrade
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CONTAINER_TOOL: podman
+      REGISTRY: ghcr.io
+      IMG: ghcr.io/securesign/model-validation-operator:dev-${{ github.sha }}
+      AGENT_IMG: ghcr.io/securesign/model-validation-operator-agent:dev-${{ github.sha }}
+      BUNDLE_IMG: ghcr.io/securesign/model-validation-operator-bundle:dev-${{ github.sha }}
+      CATALOG_IMG: ghcr.io/securesign/model-validation-operator-fbc:dev-${{ github.sha }}
+      OCP_VERSION: ${{ vars.OLM_INDEX_VERSION }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+
+      - name: Compute OLM upgrade version
+        run: |
+          CURRENT=$(grep '^VERSION ?=' Makefile | cut -d= -f2 | tr -d ' ')
+          NEXT=$(echo "$CURRENT" | awk -F. '{print $1"."$2"."$3+1}')
+          echo "OLM_UPGRADE_VERSION=$NEXT" >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@def8c394e3ad351a79bc93815e4a585520fe993b # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Log in to GitHub Container Registry
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          auth_file_path: /tmp/config.json
+
+      - name: Log in to registry.redhat.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: registry.redhat.io
+          auth_file_path: /tmp/config.json
+
+      - name: Log in to brew.registry.redhat.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: brew.registry.redhat.io
+          auth_file_path: /tmp/config.json
+
+      - name: Swap to dev images
+        run: make dev-images
+
+      - name: Build and push operator image
+        run: make docker-build docker-push IMG=${{ env.IMG }} AGENT_IMG=${{ env.AGENT_IMG }}
+
+      - name: Build and push agent image
+        run: make docker-build-agent docker-push-agent AGENT_IMG=${{ env.AGENT_IMG }}
+
+      - name: Build and push bundle
+        run: make bundle bundle-build bundle-push IMG=${{ env.IMG }} BUNDLE_IMG=${{ env.BUNDLE_IMG }} VERSION=${{ env.OLM_UPGRADE_VERSION }} CHANNELS=tech-preview DEFAULT_CHANNEL=tech-preview
+
+      - name: Install OPM
+        run: |
+          make opm
+          echo "$(pwd)/bin" >> $GITHUB_PATH
+
+      - name: Checkout FBC source
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          repository: securesign/fbc
+          ref: main
+          path: fbc
+
+      - name: Build and push FBC catalog
+        env:
+          BUNDLE_IMAGE: ${{ env.BUNDLE_IMG }}
+          BUNDLE_NAME: model-validation-operator.v${{ env.OLM_UPGRADE_VERSION }}
+          FBC_DIR: model-validation-operator
+          GRAPH: ${{ env.OCP_VERSION }}/model-validation-operator/graph.yaml
+          CHANNELS: tech-preview
+          CATALOG_FILE: ${{ env.OCP_VERSION }}/model-validation-operator/catalog/model-validation-operator/catalog.json
+        run: |
+          cd fbc
+          utils/configure_bundles.sh
+          utils/configure_channels.sh
+          utils/render_catalog.sh
+
+          cat $GRAPH
+          opm validate $OCP_VERSION/model-validation-operator/catalog/model-validation-operator
+          $CONTAINER_TOOL build $OCP_VERSION/model-validation-operator -f catalog.Dockerfile -t $CATALOG_IMG
+          $CONTAINER_TOOL push $CATALOG_IMG
+
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          cluster_name: kind
+          config: ./ci/kind-config.yaml
+
+      - name: Wait for kind cluster to be ready
+        run: |
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          kubectl wait --for=condition=Ready --namespace=kube-system pod --all --timeout=300s
+          echo "Cluster is ready"
+
+      - name: Load images into Kind
+        run: |
+          $CONTAINER_TOOL save ${{ env.IMG }} -o operator-oci.tar
+          $CONTAINER_TOOL save ${{ env.AGENT_IMG }} -o agent-oci.tar
+          $CONTAINER_TOOL save ${{ env.BUNDLE_IMG }} -o bundle-oci.tar
+          $CONTAINER_TOOL save ${{ env.CATALOG_IMG }} -o catalog-oci.tar
+
+          kind load image-archive operator-oci.tar
+          kind load image-archive agent-oci.tar
+          kind load image-archive bundle-oci.tar
+          kind load image-archive catalog-oci.tar
+
+      - name: Install OLM
+        run: make e2e-install-olm
+
+      - name: Setup namespaces
+        run: make e2e-setup-namespaces
+
+      - name: Run OLM upgrade tests
+        env:
+          TEST_BASE_CATALOG: registry.redhat.io/redhat/redhat-operator-index:${{ vars.OLM_INDEX_VERSION }}
+          TEST_TARGET_CATALOG: ${{ env.CATALOG_IMG }}
+        run: |
+          go test ./test/e2e-olm/ -v -ginkgo.v -timeout 20m

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sigstore/model-validation-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -185,6 +186,9 @@ func CreateTestNamespacedName(name, namespace string) types.NamespacedName {
 func SetupFakeClientWithObjects(objects ...client.Object) client.Client {
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
+		panic(err) // This should not happen in tests
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
 		panic(err) // This should not happen in tests
 	}
 	if err := v1alpha1.AddToScheme(scheme); err != nil {

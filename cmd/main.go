@@ -21,6 +21,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
@@ -30,6 +31,7 @@ import (
 	"github.com/sigstore/model-validation-operator/internal/tracker"
 	"github.com/sigstore/model-validation-operator/internal/utils"
 	"github.com/sigstore/model-validation-operator/internal/webhooks"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -375,9 +377,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	operatorNamespace := getOperatorNamespace()
+	if operatorNamespace == "" {
+		setupLog.Info("operator namespace not found, skipping NetworkPolicy install (set POD_NAMESPACE for local runs)")
+	} else {
+		directClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+		if err != nil {
+			setupLog.Error(err, "unable to create client for NetworkPolicy install")
+			os.Exit(1)
+		}
+		if err := controller.InstallNetworkPolicy(context.TODO(), directClient, operatorNamespace); err != nil {
+			setupLog.Error(err, "unable to install NetworkPolicy")
+			os.Exit(1)
+		}
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+const namespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+func getOperatorNamespace() string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns
+	}
+	data, err := os.ReadFile(namespaceFile)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
