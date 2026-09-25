@@ -955,4 +955,79 @@ var _ = Describe("Pod webhook", func() {
 			_ = k8sClient.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: contSecCtxTestNamespace}})
 		})
 	})
+
+	Context("filterVolumeMounts", func() {
+		containers := func(mounts ...corev1.VolumeMount) []corev1.Container {
+			return []corev1.Container{{VolumeMounts: mounts}}
+		}
+		mount := func(name, path string) corev1.VolumeMount {
+			return corev1.VolumeMount{Name: name, MountPath: path}
+		}
+
+		It("should match mounts whose path is a prefix of a needed path", func() {
+			result := filterVolumeMounts(
+				containers(mount("data", "/data"), mount("config", "/config")),
+				[]string{"/data/model.onnx"},
+			)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Name).To(Equal("data"))
+			Expect(result[0].ReadOnly).To(BeTrue())
+		})
+
+		It("should reject root mountPath /", func() {
+			result := filterVolumeMounts(
+				containers(mount("root-vol", "/"), mount("data", "/data")),
+				[]string{"/data/model.onnx"},
+			)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Name).To(Equal("data"))
+		})
+
+		It("should not match partial directory names", func() {
+			result := filterVolumeMounts(
+				containers(mount("dat", "/dat")),
+				[]string{"/data/model.onnx"},
+			)
+			Expect(result).To(BeEmpty())
+		})
+
+		It("should match exact mountPath equal to needed path", func() {
+			result := filterVolumeMounts(
+				containers(mount("model", "/data")),
+				[]string{"/data"},
+			)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Name).To(Equal("model"))
+		})
+
+		It("should deduplicate mounts across containers", func() {
+			result := filterVolumeMounts(
+				[]corev1.Container{
+					{VolumeMounts: []corev1.VolumeMount{mount("a", "/data")}},
+					{VolumeMounts: []corev1.VolumeMount{mount("b", "/data")}},
+				},
+				[]string{"/data/model.onnx"},
+			)
+			Expect(result).To(HaveLen(1))
+			Expect(result[0].Name).To(Equal("a"))
+		})
+
+		It("should return empty for no matching paths", func() {
+			result := filterVolumeMounts(
+				containers(mount("logs", "/var/log")),
+				[]string{"/data/model.onnx"},
+			)
+			Expect(result).To(BeEmpty())
+		})
+
+		It("should match multiple needed paths to multiple mounts", func() {
+			result := filterVolumeMounts(
+				containers(mount("data", "/data"), mount("trust", "/trust"), mount("logs", "/var/log")),
+				[]string{"/data/model.onnx", "/trust/config.json"},
+			)
+			Expect(result).To(HaveLen(2))
+			names := []string{result[0].Name, result[1].Name}
+			Expect(names).To(ContainElements("data", "trust"))
+		})
+	})
 })
