@@ -135,6 +135,19 @@ type ContinuousValidation struct {
 	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(m|h))+$`
 	// +kubebuilder:validation:XValidation:rule="self == '' || duration(self) >= duration('1m')", message="interval must be at least 1m"
 	Interval string `json:"interval,omitempty"`
+
+	// Watch enables filesystem event-based re-validation using inotify.
+	// When true, the agent watches the model path for file changes and
+	// triggers re-validation on create/write/remove events (with debounce).
+	// The interval-based polling still runs as a fallback.
+	//
+	// Supported: local and block-backed storage (NVMe, SSD, HDD, iSCSI,
+	// Ceph RBD, local PVs, emptyDir, hostPath).
+	// Not supported: network filesystems (NFS, CIFS/SMB, GlusterFS) where
+	// the kernel does not generate inotify events for remote writes.
+	//
+	// +kubebuilder:default=false
+	Watch bool `json:"watch,omitempty"`
 }
 
 // ModelValidationSpec defines the desired state of ModelValidation
@@ -259,6 +272,9 @@ func (mv *ModelValidation) GetConfigHash() string {
 		if mv.Spec.ContinuousValidation.Enabled {
 			hasher.Write([]byte("continuous-enabled"))
 			hasher.Write([]byte(mv.Spec.ContinuousValidation.Interval))
+			if mv.Spec.ContinuousValidation.Watch {
+				hasher.Write([]byte("watch-enabled"))
+			}
 		} else {
 			hasher.Write([]byte("continuous-disabled"))
 		}

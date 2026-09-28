@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sigstore/model-validation-operator/internal/validation"
+	"github.com/sigstore/model-validation-operator/internal/watcher"
 	"github.com/sigstore/model-validation-operator/pkg/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -34,17 +35,22 @@ func main() {
 	var interval time.Duration
 	var healthPort int
 	var skipInitial bool
+	var watch bool
 
 	flag.DurationVar(&interval, "interval", 0, "Validation interval (e.g., 5m, 1h). If 0 or not set, runs once and exits.")
 	flag.IntVar(&healthPort, "health-port", 8080, "Health check server port")
 	flag.BoolVar(&skipInitial, "skip-initial", false,
 		"Skip initial validation (used with legacy sidecar mode where init container already validated)")
+	flag.BoolVar(&watch, "watch", false,
+		"Watch model path for file changes using inotify and re-validate on change. "+
+			"Works on local/block storage (NVMe, SSD, Ceph RBD, etc). "+
+			"Not supported on network filesystems (NFS, CIFS) — use --interval as fallback.")
 	flag.Parse()
 
 	log.SetLogger(zap.New())
 	logger := log.Log.WithName("validation-agent")
 
-	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort, "skipInitial", skipInitial)
+	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort, "skipInitial", skipInitial, "watch", watch)
 
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -100,17 +106,42 @@ func main() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
+		var watchCh <-chan struct{}
+		if watch {
+			cfg, parseErr := validation.ParseArgs(validationArgs)
+			if parseErr != nil {
+				logger.Error(parseErr, "Failed to parse args for file watcher, continuing without watch")
+			} else {
+				fw := watcher.New(cfg.ModelPath, logger)
+				var watchErr error
+				watchCh, watchErr = fw.Run(ctx)
+				if watchErr != nil {
+					logger.Error(watchErr, "Failed to start file watcher, continuing with interval-only")
+				}
+			}
+		}
+
 		for {
 			select {
 			case <-ticker.C:
 				logger.Info("Running periodic validation")
 				if err := runValidation(ctx, validationArgs, logger, "periodic"); err != nil {
 					logger.Error(err, "Validation failed")
-					// Don't unmark ready - once ready, stay ready
-					// This allows the pod to continue running despite transient failures
 				} else {
 					logger.Info("Validation successful")
-					markReady() // Ensure ready state persists
+					markReady()
+				}
+			case _, ok := <-watchCh:
+				if !ok {
+					watchCh = nil
+					continue
+				}
+				logger.Info("File change detected, running validation")
+				if err := runValidation(ctx, validationArgs, logger, "file-change"); err != nil {
+					logger.Error(err, "Validation failed")
+				} else {
+					logger.Info("Validation successful")
+					markReady()
 				}
 			case <-ctx.Done():
 				logger.Info("Shutting down gracefully")
