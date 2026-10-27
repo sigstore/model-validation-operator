@@ -24,15 +24,24 @@ import (
 
 const defaultDebounce = 2 * time.Second
 
+// Watcher watches a model path (a directory tree or a single file) for
+// changes and emits debounced notifications.
 type Watcher struct {
 	path     string
 	debounce time.Duration
 	logger   logr.Logger
 
-	mu    sync.Mutex
-	timer *time.Timer
+	// target is set when path is a single file. The parent directory is
+	// watched instead, so the watch survives atomic replaces (write to a temp
+	// file, then rename over the target), and events are filtered to target.
+	target string
+
+	mu     sync.Mutex
+	timer  *time.Timer
+	closed bool
 }
 
+// New returns a Watcher for path. Call Run to start watching.
 func New(path string, logger logr.Logger) *Watcher {
 	return &Watcher{
 		path:     path,
@@ -49,16 +58,19 @@ func (w *Watcher) Run(ctx context.Context) (<-chan struct{}, error) {
 		return nil, err
 	}
 
-	if err := w.addRecursive(fsw, w.path); err != nil {
-		fsw.Close()
+	if err := w.addWatches(fsw); err != nil {
+		_ = fsw.Close()
 		return nil, err
 	}
 
 	ch := make(chan struct{}, 1)
 
 	go func() {
-		defer fsw.Close()
+		defer func() { _ = fsw.Close() }()
 		defer close(ch)
+		// Runs before close(ch) so a pending debounce timer cannot send on
+		// the closed channel.
+		defer w.stopTimer()
 
 		for {
 			select {
@@ -69,9 +81,12 @@ func (w *Watcher) Run(ctx context.Context) (<-chan struct{}, error) {
 				if !isRelevant(event) {
 					continue
 				}
+				if w.target != "" && filepath.Clean(event.Name) != w.target {
+					continue
+				}
 				w.logger.V(1).Info("File event detected", "name", event.Name, "op", event.Op.String())
 
-				if event.Op.Has(fsnotify.Create) {
+				if w.target == "" && event.Op.Has(fsnotify.Create) {
 					w.tryAddWatch(fsw, event.Name)
 				}
 
@@ -101,11 +116,48 @@ func (w *Watcher) debounceSend(ch chan<- struct{}) {
 		w.timer.Stop()
 	}
 	w.timer = time.AfterFunc(w.debounce, func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+
+		// Timer.Stop does not wait for an already running callback, so the
+		// closed check under the lock is what guards against sending on ch
+		// after it was closed.
+		if w.closed {
+			return
+		}
 		select {
 		case ch <- struct{}{}:
 		default:
 		}
 	})
+}
+
+func (w *Watcher) stopTimer() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.closed = true
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+}
+
+func (w *Watcher) addWatches(fsw *fsnotify.Watcher) error {
+	info, err := os.Stat(w.path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return w.addRecursive(fsw, w.path)
+	}
+
+	w.target = filepath.Clean(w.path)
+	dir := filepath.Dir(w.target)
+	if err := fsw.Add(dir); err != nil {
+		w.logger.Error(err, "Failed to watch parent directory of model file", "path", dir)
+		return err
+	}
+	return nil
 }
 
 func (w *Watcher) addRecursive(fsw *fsnotify.Watcher, root string) error {

@@ -210,3 +210,138 @@ func TestWatcher_ContextCancellation(t *testing.T) {
 		t.Fatal("timed out waiting for channel close after cancel")
 	}
 }
+
+func TestWatcher_CancelWithPendingDebounce(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "model.bin")
+	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zap.New()
+	w := New(dir, logger)
+	w.debounce = 200 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := w.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Let the event arm the debounce timer, then shut down before it fires
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Drain until the watcher closes the channel on shutdown
+	for {
+		if _, ok := <-ch; !ok {
+			break
+		}
+	}
+
+	// Wait past the debounce window; a late timer send on the closed
+	// channel would panic and crash the test binary
+	time.Sleep(2 * w.debounce)
+}
+
+func TestWatcher_SingleFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "model.bin")
+	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zap.New()
+	w := New(f, logger)
+	w.debounce = 100 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := w.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for single file write event")
+	}
+}
+
+func TestWatcher_SingleFileAtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "model.bin")
+	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zap.New()
+	w := New(f, logger)
+	w.debounce = 100 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := w.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write-then-rename replaces the inode; the watch must survive it
+	for i := range 2 {
+		tmp := filepath.Join(dir, "model.bin.tmp")
+		if err := os.WriteFile(tmp, []byte{byte(i)}, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(tmp, f); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for event after replace %d", i)
+		}
+	}
+}
+
+func TestWatcher_SingleFileIgnoresSiblings(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "model.bin")
+	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zap.New()
+	w := New(f, logger)
+	w.debounce = 100 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := w.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "other.bin"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-ch:
+		t.Fatal("unexpected event for sibling file")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
