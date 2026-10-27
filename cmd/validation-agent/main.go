@@ -50,7 +50,8 @@ func main() {
 	log.SetLogger(zap.New())
 	logger := log.Log.WithName("validation-agent")
 
-	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort, "skipInitial", skipInitial, "watch", watch)
+	logger.Info("Starting validation agent",
+		"interval", interval, "healthPort", healthPort, "skipInitial", skipInitial, "watch", watch)
 
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
