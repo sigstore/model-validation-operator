@@ -138,6 +138,24 @@ spec:
                       When true, the validation container periodically re-validates the model.
                       When false (default), the validation container runs as a standard init container (one-shot).
                     type: boolean
+                  failureThreshold:
+                    default: 1
+                    description: |-
+                      FailureThreshold is the number of consecutive failed periodic re-validations
+                      after which the pod is marked not-ready and removed from the Service
+                      endpoints, until a later periodic validation succeeds again.
+                      Only used when Enabled is true.
+
+                      A value of 0 disables readiness revocation (fail-open): once the pod has
+                      become ready, it stays ready regardless of later periodic failures. This
+                      matches the pre-1.0 behavior.
+
+                      The default is 1 (fail-closed): a single failed periodic validation removes
+                      the pod from rotation. Set a higher value to tolerate transient failures
+                      (e.g. 3 only revokes readiness after three consecutive failures).
+                    format: int32
+                    minimum: 0
+                    type: integer
                   interval:
                     default: 5m
                     description: |-
