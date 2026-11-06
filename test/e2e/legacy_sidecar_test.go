@@ -19,6 +19,7 @@ package e2e
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:revive
@@ -29,7 +30,11 @@ import (
 	utils "github.com/sigstore/model-validation-operator/test/utils"
 )
 
-const legacySidecarTestNamespace = "e2e-webhook-test-ns"
+const (
+	legacySidecarTestNamespace = "e2e-webhook-test-ns"
+	legacySidecarLeaderLease   = "2b2639c9.sigstore.dev"
+	controllerPodSelector      = "control-plane=controller-manager"
+)
 
 // defaultLegacyPodData creates a standard pod configuration for legacy sidecar tests
 func defaultLegacyPodData(podName, namespace, modelName string) utils.PodTemplateData {
@@ -65,6 +70,27 @@ var _ = Describe("Legacy Sidecar Continuous Validation", Ordered, func() {
 				_, err := utils.Run(cmd)
 				return err
 			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("waiting for the new controller pod to acquire the leader lease")
+			Eventually(func() error {
+				podName, err := currentControllerPodName()
+				if err != nil {
+					return err
+				}
+
+				holder, err := utils.KubectlGet(
+					"lease", legacySidecarLeaderLease, operatorNamespace,
+					"jsonpath={.spec.holderIdentity}",
+				)
+				if err != nil {
+					return err
+				}
+				if !strings.HasPrefix(holder, podName+"_") {
+					return fmt.Errorf("leader lease is held by %q; waiting for controller pod %q", holder, podName)
+				}
+				return nil
+			}, 2*time.Minute, time.Second).Should(Succeed(),
+				"new controller should acquire the leader lease before the test creates a pod")
 		})
 
 		AfterAll(func() {
@@ -99,6 +125,9 @@ var _ = Describe("Legacy Sidecar Continuous Validation", Ordered, func() {
 			By("deploying a pod with the validation label")
 			err = utils.KubectlApply(podTemplate,
 				defaultLegacyPodData(podName, legacySidecarTestNamespace, modelName))
+			if err != nil {
+				logCurrentControllerPods()
+			}
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying the init container was injected (one-shot validation)")
@@ -202,3 +231,38 @@ var _ = Describe("Legacy Sidecar Continuous Validation", Ordered, func() {
 		})
 	})
 })
+
+func currentControllerPodName() (string, error) {
+	cmd := exec.Command("kubectl", "get", "pods", "-l", controllerPodSelector,
+		"-n", operatorNamespace,
+		"-o", `go-template={{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}`)
+	output, err := utils.Run(cmd)
+	if err != nil {
+		return "", err
+	}
+	podNames := utils.GetNonEmptyLines(output)
+	if len(podNames) != 1 {
+		return "", fmt.Errorf("expected one active controller pod, found %d: %v", len(podNames), podNames)
+	}
+	return podNames[0], nil
+}
+
+func logCurrentControllerPods() {
+	cmd := exec.Command("kubectl", "get", "pods", "-l", controllerPodSelector,
+		"-n", operatorNamespace,
+		"-o", `go-template={{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}`)
+	output, err := utils.Run(cmd)
+	if err != nil {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to list current controller pods: %v\n", err)
+		return
+	}
+
+	for _, podName := range utils.GetNonEmptyLines(output) {
+		logs, err := utils.Run(exec.Command("kubectl", "logs", podName, "-n", operatorNamespace))
+		if err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get controller logs for %s: %v\n", podName, err)
+			continue
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter, "=== Controller logs for %s ===\n%s\n", podName, logs)
+	}
+}
