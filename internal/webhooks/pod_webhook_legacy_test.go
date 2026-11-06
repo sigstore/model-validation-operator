@@ -83,8 +83,33 @@ var _ = Describe("Legacy sidecar support", func() {
 			Expect(container.RestartPolicy).NotTo(BeNil(), "restartPolicy should be set for native sidecar")
 			Expect(*container.RestartPolicy).To(Equal(corev1.ContainerRestartPolicyAlways))
 			Expect(container.Args[0]).To(Equal("--interval=10m"))
+			Expect(container.Args[1]).To(Equal("--max-consecutive-failures=0"))
 			Expect(container.ReadinessProbe).NotTo(BeNil())
 			Expect(container.LivenessProbe).NotTo(BeNil())
+		})
+
+		It("Should pass the configured failureThreshold to the native sidecar", func() {
+			mv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:       "test-mv",
+				Namespace:  "default",
+				ConfigType: "sigstore",
+			})
+			mv.Spec.ContinuousValidation = &v1alpha1.ContinuousValidation{
+				Enabled:          true,
+				Interval:         "10m",
+				FailureThreshold: 3,
+			}
+
+			pp := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: make(map[string]string),
+				},
+			}
+
+			args := []string{"verify", "sigstore", "--signature=/sig", "/model"}
+			container := buildValidationContainer(mv, args, nil, pp, nil, true)
+
+			Expect(container.Args[1]).To(Equal("--max-consecutive-failures=3"))
 		})
 	})
 
@@ -113,7 +138,8 @@ var _ = Describe("Legacy sidecar support", func() {
 			Expect(container.RestartPolicy).To(BeNil(), "regular containers don't use restartPolicy")
 			Expect(container.Args[0]).To(Equal("--interval=15m"))
 			Expect(container.Args[1]).To(Equal("--skip-initial"))
-			Expect(container.Args[2:]).To(Equal(args))
+			Expect(container.Args[2]).To(Equal("--max-consecutive-failures=0"))
+			Expect(container.Args[3:]).To(Equal(args))
 			Expect(container.ReadinessProbe).NotTo(BeNil())
 			Expect(container.LivenessProbe).NotTo(BeNil())
 			Expect(container.ReadinessProbe.HTTPGet.Path).To(Equal("/ready"))
@@ -140,6 +166,30 @@ var _ = Describe("Legacy sidecar support", func() {
 			container := buildLegacySidecarContainer(mv, args, nil, pp)
 
 			Expect(container.Args[0]).To(Equal("--interval=5m"))
+		})
+
+		It("Should pass the configured failureThreshold to the legacy sidecar", func() {
+			mv := testutil.CreateTestModelValidation(testutil.TestModelValidationOptions{
+				Name:       "test-mv",
+				Namespace:  "default",
+				ConfigType: "sigstore",
+			})
+			mv.Spec.ContinuousValidation = &v1alpha1.ContinuousValidation{
+				Enabled:          true,
+				Interval:         "15m",
+				FailureThreshold: 5,
+			}
+
+			pp := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: make(map[string]string),
+				},
+			}
+
+			args := []string{"verify", "sigstore", "--signature=/sig", "/model"}
+			container := buildLegacySidecarContainer(mv, args, nil, pp)
+
+			Expect(container.Args[2]).To(Equal("--max-consecutive-failures=5"))
 		})
 	})
 

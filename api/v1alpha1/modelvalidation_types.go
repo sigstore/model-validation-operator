@@ -17,6 +17,7 @@ package v1alpha1
 import (
 	"crypto/sha256"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,6 +136,23 @@ type ContinuousValidation struct {
 	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(m|h))+$`
 	// +kubebuilder:validation:XValidation:rule="self == '' || duration(self) >= duration('1m')", message="interval must be at least 1m"
 	Interval string `json:"interval,omitempty"`
+
+	// FailureThreshold is the number of consecutive failed periodic re-validations
+	// after which the pod is marked not-ready and removed from the Service
+	// endpoints, until a later periodic validation succeeds again.
+	// Only used when Enabled is true.
+	//
+	// A value of 0 disables readiness revocation (fail-open): once the pod has
+	// become ready, it stays ready regardless of later periodic failures. This
+	// matches the pre-1.0 behavior.
+	//
+	// The default is 1 (fail-closed): a single failed periodic validation removes
+	// the pod from rotation. Set a higher value to tolerate transient failures
+	// (e.g. 3 only revokes readiness after three consecutive failures).
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Optional
+	FailureThreshold int32 `json:"failureThreshold"`
 }
 
 // ModelValidationSpec defines the desired state of ModelValidation
@@ -259,6 +277,8 @@ func (mv *ModelValidation) GetConfigHash() string {
 		if mv.Spec.ContinuousValidation.Enabled {
 			hasher.Write([]byte("continuous-enabled"))
 			hasher.Write([]byte(mv.Spec.ContinuousValidation.Interval))
+			hasher.Write([]byte("failure-threshold:" +
+				strconv.Itoa(int(mv.Spec.ContinuousValidation.FailureThreshold))))
 		} else {
 			hasher.Write([]byte("continuous-disabled"))
 		}
