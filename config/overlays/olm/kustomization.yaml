@@ -6,6 +6,7 @@ resources:
 
 components:
 - ../../components/webhook
+- ../../components/service-monitor
 
 namespace: model-validation-operator-system
 
@@ -15,7 +16,6 @@ images:
 - name: controller
   newName: ghcr.io/sigstore/model-validation-operator
   newTag: v1.0.0
-
 replacements:
 - source:
     fieldPath: spec.template.spec.containers.[name=manager].image
