@@ -175,7 +175,10 @@ When continuous validation is enabled:
 1. The validation container runs as a native sidecar (not just an init container)
 2. After the initial validation succeeds, the container becomes ready
 3. The validation repeats at the specified interval
-4. On validation failure, the error is logged but the container continues running
+4. On validation failure, the error is logged and, once the configured
+   `failureThreshold` of consecutive failures is reached, the container is marked
+   not-ready so Kubernetes removes the pod from the Service endpoints. A later
+   successful validation restores readiness.
 5. The readiness probe reflects the validation state
 
 #### Configuration
@@ -198,7 +201,15 @@ spec:
   continuousValidation:
     enabled: true
     interval: "10m"  # Supports s, m, h units (e.g., "30s", "5m", "1h")
+    failureThreshold: 1  # Consecutive failed re-validations before the pod is
+                         # removed from Service endpoints. Default 1 (fail-closed);
+                         # 0 never revokes readiness (legacy fail-open behavior).
 ```
+
+> **Upgrade note:** `failureThreshold` defaults to `1`, so a pod whose model
+> starts failing re-validation is now removed from rotation by default. To keep
+> the previous behavior where a pod stays ready regardless of later failures, set
+> `failureThreshold: 0`. Use a higher value to tolerate transient failures.
 
 #### Requirements
 
