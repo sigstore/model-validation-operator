@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: model-validation-operator
+  name: model-validation-modelvalidation-admin-role
+rules:
+- apiGroups:
+  - ml.sigstore.dev
+  resources:
+  - modelvalidations
+  verbs:
+  - '*'
+- apiGroups:
+  - ml.sigstore.dev
+  resources:
+  - modelvalidations/status
+  verbs:
+  - get

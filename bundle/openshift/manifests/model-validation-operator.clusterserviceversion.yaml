@@ -1,0 +1,291 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "ml.sigstore.dev/v1alpha1",
+          "kind": "ModelValidation",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "model-validation-operator"
+            },
+            "name": "modelvalidation-sample",
+            "namespace": "model-validation-operator-system"
+          },
+          "spec": null
+        }
+      ]
+    capabilities: Seamless Upgrades
+    containerImage: ghcr.io/sigstore/model-validation-operator:v1.0.0
+    createdAt: "2026-11-11T12:01:34Z"
+    operatorframework.io/suggested-namespace: model-validation-operator-system
+    operatorframework.io/suggested-namespace-template: '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"model-validation-operator-system","labels":{"openshift.io/cluster-monitoring":"true"}}}'
+    operators.operatorframework.io/builder: operator-sdk-v1.42.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  name: model-validation-operator.v1.0.0
+  namespace: model-validation-operator-system
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: ModelValidation is the Schema for the modelvalidations API.
+      displayName: Model Validation
+      kind: ModelValidation
+      name: modelvalidations.ml.sigstore.dev
+      version: v1alpha1
+    - description: |-
+        TelemetryConfig is the Schema for the telemetryconfigs API.
+        It defines OpenTelemetry configuration that the operator injects into
+        validation agent containers via environment variables.
+      displayName: Telemetry Config
+      kind: TelemetryConfig
+      name: telemetryconfigs.ml.sigstore.dev
+      version: v1alpha1
+  description: Model Validation Operator helps protect machine learning workloads
+    by verifying model artifacts before containers use them. A Kubernetes admission
+    webhook injects a validation init container based on a ModelValidation resource.
+    It supports Sigstore signatures, public-key verification, and certificate-based
+    verification to help teams check model integrity and provenance during workload
+    deployment.
+  displayName: Model Validation Operator
+  icon:
+  - base64data: PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjUgMTIwIj4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLmNscy0xIHsKICAgICAgICBmaWxsOiBub25lOwogICAgICB9CgogICAgICAuY2xzLTIgewogICAgICAgIGZpbGw6ICMyZTJmNzE7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0ibTEwNi4wMDU0NjY2LDU5LjUzNDEzNDRjLjE2MzE3NDgtMjEuNzEyMjIwMi0xNS4yMzU1OTI0LTQwLjg4NTA2MDQtMzYuMTc1MjQzOC00NS4yNTI3Nzc2LTIzLjMyMTU3MjktNC44NjQ2OTUtNDIuNDY1NTIyMSw4LjQ4NTQwODktNDkuMzAzNTAyMywyMi4xNDI2ODk3LDEuNDk2NDcyLTEuODQzOTc4MSwyLjc0OTgwNDQtMy42MDg3NDI0LDQuMjIxMTIzNy01LjE2NzU2MDIsMTcuMzk4NTY0LTE4LjQzMzgxNzgsNDUuNTM4NzA2MS0yMC4wNDI5MDY4LDY0LjkzNjg1NDctMy43NDg0MDk5LDEzLjM4ODA0ODEsMTEuMjQ1OTE3OCwxOC4zMjk2MDYyLDMwLjA1MjkxNjIsMTIuMTMwMzAwOSw0Ni4xNjYxNDM1LTcuNjE1NzIwNywxOS43OTQ4MDc4LTI4Ljc5Nzg1OCwzMS40Nzg5NDY3LTUwLjU0NDY0NTQsMjcuNzk1NzE1LTExLjk5NzE4MTEtMi4wMzE5OTAzLTIxLjc2MzczNTUtNy45MDA5MTUzLTI5LjM0ODM5OC0xNy40NTI5ODA0LDYuNzM0MTEyNSwxMi42NTkyODg4LDI1LjQyMjM5MzYsMjQuMjIxMDA2NSw0NS43OTc0ODY2LDIwLjU0NTY2NCwyMi4zMjY5ODA5LTQuMDI3NDY5NywzOC4xMTgwODk5LTIyLjY4NDc1NTYsMzguMjg2MDIzNS00NS4wMjg0ODRaIi8+CiAgPHBhdGggY2xhc3M9ImNscy0yIiBkPSJtMTIwLjYwNjU4MSw1MS45NTkzODUyYy0yLjYyMDU3NzYtNS4yODcxMzc2LTYuMjk0MjYzMS05LjIzMDM5NDEtMTAuNjY0MjMzNi0xMi45Nzc0Mjc5LTcuMTAwNzM5OC02LjA4ODcyMzctNy45MDcxNzYzLTkuNTUwNzM0OS0xMC4zNTQ4MjY1LTE5LjAxNTY1MTEtMi42NjIwMTkyLTEwLjI5MzkzMTItMTYuOTMwMDUyOS0xOS4yMjk0NDEtMjcuMzgwNTMwOS0xNi45OTY2ODczLTguMDAwNTUxNywxLjcwOTMxMDEtMTUuODExNTQ4OSwyLjE1ODkwNjUtMjMuNzU5NTEzMS4yNjQ5Nzg0LS44NDEyOTAzLS4yMDA1MzQxLTEuNzMyMzI0My0uMjIzNjA1Ni0yLjYwMzIyODEtLjI2Mjk2MDItNC4yMjYwMTQzLS4xOTA5MDE5LTcuNjYzMTk5NiwxLjM0NzE4MzctMTAuMjg2Njk1NSw0LjcwMDE2NzItMS41NzcyNzM5LDIuMDE1NzUzLTIuOTYxODUxNCw0LjE2NTMwMjUtNC4xMTEwNTgxLDYuNDM0MDE2Ni0zLjA0ODYzOSw2LjAxODQwODMtNy43MjMxMjAyLDEwLjI4OTc1NzItMTMuNjUzODEyLDEzLjM2MjEyMTMtMi43MDk2MjQyLDEuNDAzNzM4Ny01LjM4NTQ4OTcsMi45MjI5MjY4LTcuODkyNjc2Myw0LjY1NjE3OTktMy44NjExNDE2LDIuNjY5MzY5NS03LjAxNjI2MjcsNS45NjE1MzIyLTcuNjE5Njk0LDEwLjk0MDg1MDktLjQzOTU5NzIsMy42Mjc3MzE3LjY3MjkyMSw2Ljk3NjQwMzYsMi4zNzgxNjYyLDEwLjA0ODUzODQsMy4xMzUxNjI5LDUuNjQ4MDcxNSw0LjY3NzQ5NywxMS41ODU2MTQ4LDQuMDU3NTk5MiwxNy40NDM1Nzc1LDAsMi40MjA2MjgzLS4wNjUxNjEsNC4yNDQyNDEuMDExNzkzOCw2LjA2MTc5OTIuMjY1MTE2LDYuMjU5MDc2NywxLjczMDQ5NTMsMTEuOTg2MTc4NSw3LjI0OTI3NywxNS44NTE0MTM4LDIuMDk2MTkzNywxLjQ2ODEzNzIsNC4zMjE4ODk1LDIuNzM5NDA5Niw2LjY3NTMzMjksMy42OTgwNDcxLDYuODk4NTU0NCwyLjgwOTgxNjcsMTIuNDU1Mjk3NCw3LjE0NDgzMDIsMTYuMjQ1MTIwMiwxMy42NDQ2MjEyLjUwNjM4MDcuODY4NTUzLDEuMjQ0NTk0NiwxLjYxNDE4MDMsMS45MzY5MDYzLDIuMzU5NjI0MSwzLjE0NjczMzEsMy4zODg0MzkzLDcuMDA2MjE3Niw1LjA5NTg2ODgsMTEuNjY4NTE1Miw0Ljk0MjU3ODYsMy40NzM2MTAxLS4xMTQyMTA5LDYuNzk0MzAyNi0uOTQyMjYyNiw5LjkyNDEzOTEtMi4zNTczNzY2LDkuMzY2ODI3OS00LjIzNTI5NjgsMTguODQzNTg5NS03Ljg4ODExODIsMjkuMTI0MzM5NC05LjUzNzU3MDgsNy4yNzQ5NjI5LTEuMTY3MTk4NCwxMi4wMTcyMzEtNi4xMjc4MDMsMTQuNTM3MDc3MS0xMy4xMDY5MTI4LjgyMzgyMDQtMi4yODE4NzgxLDEuMjMwMDA4Ni00LjY0NzU1NjgsMS41Nzc0OTc1LTcuMDE3NDA5NC42OTE1MjYyLTQuNzE2MTI5MiwyLjk4NTE3NTEtOC4yODM3NzQsNy4xNDkwNDQzLTEwLjY0NDQ5ODkuOTQ3ODEyNi0uNTM3MzQxNSwxLjMxODIyOTctMS4xNTkzMDkxLDIuMjAxMjc2OS0xLjgwMDAzNjcsMy4xNjQyMDg3LTIuMjk1NzMwMiw1LjA0NTg1NTctNS4zODcxMjk1LDUuNjEwODg5OS05LjI2MDYyMS41ODc5MzM3LTQuMDMwMzEzNS0uMjI5MDI5NS03LjgxNjY1NjEtMi4wMjA3MDY4LTExLjQzMTM2MTRaTTc2Ljc3NTkwNjQsNy4zNzYyMzE5Yy4wNDI1ODgzLS4yOTY5NDgzLjM4NDg3NjktLjE1MzAxNS41ODg2Njc2LS4xNTQyNTM1LDUuODgyNTI0OS0uMDM2MDk4LDEwLjM1MTU1MjYsMi40MDI4MzE2LDEzLjIzNjgzOTEsNy41OTI1OTE4LjEwOTMyNTkuMTk2NjM1My4xNjU4NDA4LjQyNjQ3OS4yMjIxODM3LjY0NzE0OTEuMDI5MTc3Ny4xMTQwMjc0LS4wMjI0NTIzLjIyNjE3NDItLjE3Nzg5MjYuMjczNDE4MS0uMjU3MDc3Ny4wMzkwNzk0LS40NzU1OTItLjA4ODExMjEtLjY1NDQ4NzktLjI3MzQ2MzktLjM5ODA2MzktLjQxMjYyNjktLjgwODg4NDctLjgxNzA4OTMtMS4xNjgyOTM1LTEuMjYyMjM2NS0yLjM1NDA1NjktMi45MTU4MTczLTUuNDAwNTExNC00LjcxMzY5ODItOS4wMDA5NTE4LTUuNjQwNjQwOS0uODQ0MzA2MS0uMjE3MzIxNy0xLjY3NTcyMzQtLjQ4NTg3NzgtMi41MDkyODUxLS43NDMxMDQ1LS4yMzU1MDI2LS4wNzI2MDg4LS41NzgwMDkxLS4xNTIwNTE4LS41MzY3Nzk2LS40Mzk0NTk2Wk0yMC4zMTY4NTgxLDQzLjg0NDEyOTVjLS4zMjIzNzYyLjg2ODkyLS42MjM4NzExLDEuNzUwNjgyOS0xLjAyMDY2NzksMi41ODU5MzU5LTIuNTk5MzQ2NSw1LjQ3MTUyNjMtMy4wODUxMDk3LDExLjE2ODc2ODEtMS45MTQwMjQsMTcuMDYzMjg3NC4yNzQ1OTM0LDEuMzgyMjI2Ny40NjU2MzI5LDIuNzgxNTE2My42NzQ3MDk5LDQuMTc1OTg5Ny4wNTkwNDkxLjM5MzkxMjguMTgzMTMzLjk0ODU5MjQtLjI2NDQxNjUsMS4wODk4MTk0LS40NjI0Mzk0LjE0NTg1OTctLjQ5MjQwMjUtLjQ1MzU4NjktLjYzNjkyNjMtLjc0OTU3MTktNC4xNzIyMDU2LTguNTQ0NjI0My0zLjc0ODc2NTQtMTYuNzYzMzU3NywxLjc5MTI4NzQtMjQuNjAxMjUwNy4yMDk5MDgzLS4yOTY5NDgzLjUwNTE1OTUtLjU0MDIzMTIuNzg3MTc3OC0uNzc2OTA5MS4xNDU3NDUtLjEyMjI4MzYuMzQ1MTcyNS0uMTI1NjMyLjUyMjkzMzMuMDY3NzQ2OC4yMzY5NDE3LjM0NzEyNzcuMjA0NzUzOS43NTQ1NzE1LjA1OTkyNjMsMS4xNDQ5NTI1Wm0xLjYwNTA5ODUsNDAuMTcyODI0OWM3LjU4NDY2MjQsOS41NTIwNjUxLDE3LjM1MTIxNjksMTUuNDIwOTkwMSwyOS4zNDgzOTgsMTcuNDUyOTgwNCwyMS43NDY3ODc0LDMuNjgzMjMxNyw0Mi45Mjg5MjQ3LTguMDAwOTA3Miw1MC41NDQ2NDU0LTI3Ljc5NTcxNSw2LjE5OTMwNTItMTYuMTEzMjI3MywxLjI1Nzc0NzItMzQuOTIwMjI1Ny0xMi4xMzAzMDA5LTQ2LjE2NjE0MzUtMTkuMzk4MTQ4Ni0xNi4yOTQ0OTY5LTQ3LjUzODI5MDgtMTQuNjg1NDA3OS02NC45MzY4NTQ3LDMuNzQ4NDA5OS0xLjQ3MTMxOTIsMS41NTg4MTc4LTIuNzI0NjUxNywzLjMyMzU4MjItNC4yMjExMjM3LDUuMTY3NTYwMiw2LjgzNzk4MDItMTMuNjU3MjgwOCwyNS45ODE5Mjk0LTI3LjAwNzM4NDcsNDkuMzAzNTAyMy0yMi4xNDI2ODk3LDIwLjkzOTY1MTMsNC4zNjc3MTcyLDM2LjMzODQxODUsMjMuNTQwNTU3NCwzNi4xNzUyNDM4LDQ1LjI1Mjc3NzYtLjE2NzkzMzYsMjIuMzQzNzI4NC0xNS45NTkwNDI2LDQxLjAwMTAxNDItMzguMjg2MDIzNSw0NS4wMjg0ODQtMjAuMzc1MDkzLDMuNjc1MzQyNS0zOS4wNjMzNzQxLTcuODg2Mzc1Mi00NS43OTc0ODY2LTIwLjU0NTY2NFptMzYuMDMwODQ2MS0yNC45OTY4NjA2Yy4wMjQ1NDUsMCwuMDQ5MDQ5OS0uMDAwMDQ1OS4wNzM1OTQ5LS4wMDAwNDU5LDAtNC44Njg0MTAzLjA3MTk3ODEtOS43MzgwNTkxLS4wMTQ5ODE2LTE0LjYwNDg2NC0uMTgwMzQwOC0xMC4wOTQyMjI3LDguNDY0MDAwMS0xMy4zMDAxMDgxLDE1LjY0NDQ0MS0xMC45MjgzMjksMS40MDIzMTExLjQ2MzIxOTEsMi43MTY4NzcxLDEuMDkyNzU0OSwzLjczOTc2OTYsMi4yMDE4Mzg4Ljk0OTIxNzMsMS4wMjkyMjgsMS4wNzYzMTEzLDIuMjgyODQxNC4zNTI5OTMsMy4zMDQyNzE4LS42OTcwNzA0Ljk4NDI3NzUtMS42MTQ1MywxLjE3Mjk3NzctMy4wMDQyMjE4LjU3MTMyOTYtMS4wMzY0NzUxLS40NDg3NzA3LTIuMDI4Nzk2Ny0xLjAxMDAwOTQtMy4wODU4ODk0LTEuMzk4NTA5OC0yLjYzMzcxODctLjk2Nzg1NjktNS42MjQwMDI0LS4xMjcxOTE1LTcuMTE1NzIxMywxLjkxNzE4MzEtLjY0MjgyNi44ODA5ODMyLS44MTQzODMxLDEuOTA4Nzg5My0uOTM0MDU4LDIuOTQ3MjM2Ny0uMjMxMTMzNywyLjAwNTcwOC0uMTQyNDcxMiw0LjAyMTczNjMtLjE0MzkxMDMsNi4wMzM4NjU3LS4wMDYwMjU5LDguNTE5NjcyMi4wMDg2MDU5LDE3LjAzOTM0NDQtLjAwNjgxMTQsMjUuNTU4OTcwNy0uMDA5MzkxNCw1LjE5NDcxNC0yLjc0NTAwNTUsOS4xMDY2NDI3LTcuNjAyMzE1OCwxMC4zODM2MDI4LTQuMTkxNzc0LDEuMTAxOTc0NC04LjI1MzQzODIuNzAyNjAzMy0xMS42NTAzOTE3LTIuMzc5OTQzNS0xLjAxODUyOTMtLjkyNDIzNjYtMS4xNzkxNjk5LTIuMjUwNTUwNC0uNTgwODkzLTMuMTk5MDA1Mi42NDQzNTY5LTEuMDIxNDc2MywxLjYzMjg3NzItMS4zMDkyNTEsMi44NTA5NjAyLS43ODAwMjgxLDEuMzMyNjAzNS41Nzg4NTE5LDIuNTQ1NzA5OCwxLjQ0OTE0NzksNC4wMjg2ODUyLDEuNjU3OTM4Miw0LjM4NDQ3NjIuNjE3MTUxNSw3LjQ1OTk3NjUtMS4yODc1MDk3LDcuNDUwODg5LTYuMDU2MjAzNC0uMDA5NjA5My01LjA3NjQyMDktLjAwMjEzODYtMTAuMTUyODg3Ni0uMDAyMTM4Ni0xNS4yMjkzMDg1Wm0yMi40OTk3NjQ5LTUuNDI5MDA2OGMyLjczNTY1NDIuMDMxMzI3Nyw0LjkzNjE0NTYsMi4yNDg4OTkyLDQuOTQ0OTY5NSw0Ljk4MzM1NTEuMDA4OTUsMi43OTQ4MTgtMi4yMzM4NjAzLDUuMDM0NDA2LTUuMDIzMzY5LDUuMDE2Mjg4Mi0yLjcyNjc5MDItLjAxNzcwNS00Ljk0NTEwMTMtMi4yMzkzMTI4LTQuOTYwMTY4OS00Ljk2NzM0NzItLjAxNTI0NTMtMi43NjAyNzk1LDIuMjkxMDc0Ni01LjA2MzcxNTUsNS4wMzg1Njg1LTUuMDMyMjk2Wm0tMzkuMDA2NTQ5Niw5Ljk5OTEzODdjLTIuNzgxMDgwNS0uMDE3OTM0My00Ljk5ODIxMDUtMi4yOTYwOTcyLTQuOTUyNjU4LTUuMDg5MDM0NS4wNDQ0MTcyLTIuNzIzMDgwNywyLjMwMTU2MTItNC45MzAyODYsNS4wMjAxODEyLTQuOTA5MTQxLDIuNzA4NjYxLjAyMTA1MzMsNC45NDcxNTM5LDIuMjYzNzE0NSw0Ljk2ODIwMTUsNC45Nzc1Mjk5LjAyMTQ0ODksMi43NjYzMzQtMi4yNTc2MTk4LDUuMDM4NTc5OS01LjAzNTcyNDcsNS4wMjA2NDU2Wm02NC40MTE3NzcxLDIwLjQxMzA2MDFjLTIuNTQ1MTM2NSw5LjE2MTg2NzUtOC4zMTMzMTI5LDE1LjAzMTcxLTE3LjY1ODA4NDEsMTcuMjIyNjc4MS0uMzU0MDgyNC4wODMwMjA4LS43MzYzODQ5LjA2OTI2MDQtMS4xMDQzOTk2LjA1OTMwNzEtLjE5MDIwODEtLjAwNTE4MzEtLjM0MTY3NTEtLjEzNDk0MzEtLjM0NjQzOTYtLjM5NzUzNjQuMDUyOTM3Mi0uNDE2OTM4NS4zNDcyNzEtLjcwMDQ5MzMuNzE0NTg2Mi0uODk2NTc4My44MTc1NzY3LS40MzY0MzIzLDEuNjI4MDcyNS0uODk2Mzk0OCwyLjQ3OTA1ODItMS4yNTgyOTE5LDUuNTc0NDMwNy0yLjM3MDU4NjUsOS43MTY4NTEtNi4zMTIwNTQxLDEyLjc1MDE1ODYtMTEuNTAwMDcxNC43MTEyNjY1LTEuMjE2NTUyMiwxLjQ5NjQ3NzctMi4zOTA0MDE0LDIuMjY0OTU4Ni0zLjU3MjczNjIuMjE3MDY5NS0uMzMzOTYzNi40OTIwOTg2LS44MzEzNTQyLjkyMDY5MzMtLjY0MDE3NzIuNDQyODMwOS4xOTc1MDY4LjA2NzY1NS42NjYwOTI1LS4wMjA1MzE2Ljk4MzQwNloiLz4KPC9zdmc+
+    mediatype: image/svg+xml
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - ml.sigstore.dev
+          resources:
+          - modelvalidations
+          - telemetryconfigs
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - ml.sigstore.dev
+          resources:
+          - modelvalidations/status
+          - telemetryconfigs/status
+          verbs:
+          - update
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: model-validation-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: model-validation-operator
+          control-plane: controller-manager
+        name: model-validation-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: model-validation-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: model-validation-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                command:
+                - /manager
+                env:
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                image: ghcr.io/sigstore/model-validation-operator:v1.0.0
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                ports:
+                - containerPort: 9443
+                  name: webhook-server
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 256Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                  readOnlyRootFilesystem: true
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: model-validation-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: model-validation-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - model signing
+  - signing
+  - ai
+  links:
+  - name: Model Validation Operator
+    url: https://github.com/sigstore/model-validation-operator
+  maintainers:
+  - email: nolear@redhat.com
+    name: Nina Bongartz
+  - email: ryordan@redhat.com
+    name: Rachel Yordan
+  - email: ifont@redhat.com
+    name: Ivan Font
+  maturity: stable
+  minKubeVersion: 1.24.0
+  provider:
+    name: Sigstore
+    url: https://sigstore.dev/
+  version: 1.0.0
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1
+    deploymentName: model-validation-controller-manager
+    containerPort: 9443
+    serviceName: model-validation-webhook
+    failurePolicy: Fail
+    generateName: pods.validation.ml.sigstore.dev
+    objectSelector:
+      matchExpressions:
+      - key: validation.ml.sigstore.dev/ml
+        operator: Exists
+    rules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    sideEffects: None
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-v1-pod
