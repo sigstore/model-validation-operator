@@ -273,7 +273,7 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 ##@ Dependencies
 
 ## Location to install dependencies to
-LOCALBIN ?= bin
+LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
