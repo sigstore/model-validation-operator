@@ -1,9 +1,9 @@
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
-# - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
-# - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+# - use the VERSION as arg of the bundle target (e.g make bundle VERSION=1.0.1)
+# - use environment variables to overwrite this value (e.g export VERSION=1.0.1)
+VERSION ?= 1.0.0
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -48,8 +48,15 @@ BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
 # BUNDLE_GEN_FLAGS are the flags passed to the operator-sdk generate bundle command
 BUNDLE_GEN_FLAGS ?= -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
 
-# BUNDLE_OVERLAY defines which overlay to use for bundle generation (e.g. make bundle BUNDLE_OVERLAY=production)
+# BUNDLE_VARIANT selects the bundle output directory and corresponding overlay.
+BUNDLE_VARIANT ?= kubernetes
+BUNDLE_DIR = bundle/$(BUNDLE_VARIANT)
+
+# BUNDLE_OVERLAY defines which overlay to use for bundle generation.
 BUNDLE_OVERLAY ?= olm
+
+# BUNDLE_IMAGE_OVERLAY selects the overlay whose image is updated before generation.
+BUNDLE_IMAGE_OVERLAY ?= $(BUNDLE_OVERLAY)
 
 # USE_IMAGE_DIGESTS defines if images are resolved via tags or digests
 # You can enable this value if you would like to use SHA Based Digests
@@ -200,7 +207,7 @@ docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
+# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:1.0.0). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
@@ -347,22 +354,36 @@ OPERATOR_SDK = $(shell which operator-sdk)
 endif
 endif
 
-.PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata from $(BUNDLE_OVERLAY) overlay, then validate generated files.
+.PHONY: generate-bundle
+generate-bundle: manifests kustomize operator-sdk ## Generate and validate one OLM bundle variant.
 	$(OPERATOR_SDK) generate kustomize manifests -q
-	cd config/overlays/$(BUNDLE_OVERLAY) && $(KUSTOMIZE) edit set image controller=$(IMG)
-	$(KUSTOMIZE) build config/overlays/$(BUNDLE_OVERLAY) | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	cd config/overlays/$(BUNDLE_IMAGE_OVERLAY) && $(KUSTOMIZE) edit set image controller=$(IMG)
+	mkdir -p $(BUNDLE_DIR)
+	cd $(BUNDLE_DIR) && cp ../../PROJECT . && $(KUSTOMIZE) build ../../config/overlays/$(BUNDLE_OVERLAY) | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) --output-dir . --kustomize-dir ../../config/manifests && rm PROJECT
 	# Fix webhook configuration in CSV
-	@if [ -f bundle/manifests/model-validation-operator.clusterserviceversion.yaml ]; then \
-		sed -i.bak 's/deploymentName: webhook/deploymentName: model-validation-controller-manager/' bundle/manifests/model-validation-operator.clusterserviceversion.yaml && \
-		sed -i.bak2 's/deploymentName: model-validation-controller-manager/deploymentName: model-validation-controller-manager\n    containerPort: 9443\n    serviceName: model-validation-webhook/' bundle/manifests/model-validation-operator.clusterserviceversion.yaml && \
-		rm -f bundle/manifests/model-validation-operator.clusterserviceversion.yaml.bak bundle/manifests/model-validation-operator.clusterserviceversion.yaml.bak2; \
+	@if [ -f $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml ]; then \
+		sed -i.bak 's/deploymentName: webhook/deploymentName: model-validation-controller-manager/' $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml && \
+		sed -i.bak2 's/deploymentName: model-validation-controller-manager/deploymentName: model-validation-controller-manager\n    containerPort: 9443\n    serviceName: model-validation-webhook/' $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml && \
+		rm -f $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml.bak $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml.bak2; \
 	fi
-	$(OPERATOR_SDK) bundle validate ./bundle
+	$(OPERATOR_SDK) bundle validate $(BUNDLE_DIR)
+
+.PHONY: bundle
+bundle: ## Generate and validate both Kubernetes and OpenShift Community bundles.
+	$(MAKE) bundle-kubernetes
+	$(MAKE) bundle-openshift
+
+.PHONY: bundle-kubernetes
+bundle-kubernetes: ## Generate an OLM bundle for vanilla Kubernetes.
+	$(MAKE) generate-bundle BUNDLE_VARIANT=kubernetes BUNDLE_OVERLAY=olm BUNDLE_IMAGE_OVERLAY=olm
+
+.PHONY: bundle-openshift
+bundle-openshift: ## Generate an OLM bundle for OpenShift Community.
+	$(MAKE) generate-bundle BUNDLE_VARIANT=openshift BUNDLE_OVERLAY=olm-openshift-community BUNDLE_IMAGE_OVERLAY=olm
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
-	$(CONTAINER_TOOL) build -f bundle.${CONTAINER_FILE} -t $(BUNDLE_IMG) .
+	$(CONTAINER_TOOL) build -f $(BUNDLE_DIR)/bundle.Dockerfile -t $(BUNDLE_IMG) $(BUNDLE_DIR)
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.

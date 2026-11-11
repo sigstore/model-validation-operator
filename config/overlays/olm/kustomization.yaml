@@ -14,7 +14,18 @@ namespace: model-validation-operator-system
 images:
 - name: controller
   newName: ghcr.io/sigstore/model-validation-operator
-  newTag: v0.0.1
+  newTag: v1.0.0
+
+replacements:
+- source:
+    fieldPath: spec.template.spec.containers.[name=manager].image
+    kind: Deployment
+    name: model-validation-controller-manager
+  targets:
+  - fieldPaths:
+    - metadata.annotations.containerImage
+    select:
+      kind: ClusterServiceVersion
 
 patches:
 - patch: |-

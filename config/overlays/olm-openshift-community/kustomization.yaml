@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../olm
+
+patches:
+- target:
+    group: operators.coreos.com
+    version: v1alpha1
+    kind: ClusterServiceVersion
+    name: model-validation-operator.v1.0.0
+  patch: |-
+    - op: add
+      path: /metadata/annotations/operatorframework.io~1suggested-namespace
+      value: model-validation-operator-system
+    - op: add
+      path: /metadata/annotations/operatorframework.io~1suggested-namespace-template
+      value: '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"model-validation-operator-system","labels":{"openshift.io/cluster-monitoring":"true"}}}'
