@@ -15,7 +15,7 @@ namespace: model-validation-operator-system
 images:
 - name: controller
   newName: ghcr.io/sigstore/model-validation-operator
-  newTag: v0.0.1
+  newTag: v1.0.0
 
 replicas:
 - count: 2
