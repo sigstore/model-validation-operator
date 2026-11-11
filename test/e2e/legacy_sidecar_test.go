@@ -109,6 +109,46 @@ var _ = Describe("Legacy Sidecar Continuous Validation", Ordered, func() {
 				"--timeout=120s")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Operator rollout did not complete")
+
+			By("waiting for the restarted controller to acquire the leader lease")
+			Eventually(func() error {
+				podName, err := currentControllerPodName()
+				if err != nil {
+					return err
+				}
+
+				holder, err := utils.KubectlGet(
+					"lease", legacySidecarLeaderLease, operatorNamespace,
+					"jsonpath={.spec.holderIdentity}",
+				)
+				if err != nil {
+					return err
+				}
+				if !strings.HasPrefix(holder, podName+"_") {
+					return fmt.Errorf("leader lease is held by %q; waiting for controller pod %q", holder, podName)
+				}
+				return nil
+			}, 2*time.Minute, time.Second).Should(Succeed(),
+				"restarted controller should acquire the leader lease before remaining E2E tests")
+
+			By("waiting for pod admission to respond after the controller restart")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "create", "--dry-run=server", "-f", "-")
+				cmd.Stdin = strings.NewReader(fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: webhook-readiness-probe
+  namespace: %s
+spec:
+  containers:
+    - name: probe
+      image: busybox:latest
+      command: ["sh", "-c", "true"]
+`, legacySidecarTestNamespace))
+				_, err := utils.Run(cmd)
+				return err
+			}, time.Minute, 2*time.Second).Should(Succeed(),
+				"pod admission webhook should respond after operator rollout")
 		})
 
 		It("should inject init container and sidecar for continuous validation", func() {
