@@ -149,6 +149,19 @@ spec:
                     x-kubernetes-validations:
                     - message: interval must be at least 1m
                       rule: self == '' || duration(self) >= duration('1m')
+                  watch:
+                    default: false
+                    description: |-
+                      Watch enables filesystem event-based re-validation using inotify.
+                      When true, the agent watches the model path for file changes and
+                      triggers re-validation on create/write/remove events (with debounce).
+                      The interval-based polling still runs as a fallback.
+
+                      Supported: local and block-backed storage (NVMe, SSD, HDD, iSCSI,
+                      Ceph RBD, local PVs, emptyDir, hostPath).
+                      Not supported: network filesystems (NFS, CIFS/SMB, GlusterFS) where
+                      the kernel does not generate inotify events for remote writes.
+                    type: boolean
                 required:
                 - enabled
                 type: object
