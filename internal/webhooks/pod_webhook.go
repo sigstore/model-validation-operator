@@ -220,8 +220,11 @@ func buildValidationContainer(
 		// Make it a native sidecar with restartPolicy: Always
 		container.RestartPolicy = ptr.To(corev1.ContainerRestartPolicyAlways)
 
-		// Prepend interval flag to args
-		container.Args = append([]string{"--interval=" + interval}, args...)
+		// Prepend interval and failure-threshold flags to args
+		container.Args = append([]string{
+			"--interval=" + interval,
+			"--max-consecutive-failures=" + strconv.Itoa(int(mv.Spec.ContinuousValidation.FailureThreshold)),
+		}, args...)
 
 		// Add readiness probe (ready after first successful validation)
 		container.ReadinessProbe = &corev1.Probe{
@@ -296,14 +299,22 @@ func buildLegacySidecarContainer(
 	}
 
 	interval := "5m"
-	if mv.Spec.ContinuousValidation != nil && mv.Spec.ContinuousValidation.Interval != "" {
-		interval = mv.Spec.ContinuousValidation.Interval
+	failureThreshold := int32(0)
+	if mv.Spec.ContinuousValidation != nil {
+		if mv.Spec.ContinuousValidation.Interval != "" {
+			interval = mv.Spec.ContinuousValidation.Interval
+		}
+		failureThreshold = mv.Spec.ContinuousValidation.FailureThreshold
 	}
 
-	// Prepend interval flag and --skip-initial to args.
+	// Prepend interval, failure-threshold and --skip-initial flags to args.
 	// --skip-initial tells the agent to skip initial validation since the
 	// init container already performed it.
-	sidecarArgs := append([]string{"--interval=" + interval, "--skip-initial"}, args...)
+	sidecarArgs := append([]string{
+		"--interval=" + interval,
+		"--skip-initial",
+		"--max-consecutive-failures=" + strconv.Itoa(int(failureThreshold)),
+	}, args...)
 
 	container := corev1.Container{
 		Name:            constants.ModelValidationSidecarContainerName,

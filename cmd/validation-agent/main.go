@@ -34,17 +34,25 @@ func main() {
 	var interval time.Duration
 	var healthPort int
 	var skipInitial bool
+	var maxConsecutiveFailures int
 
 	flag.DurationVar(&interval, "interval", 0, "Validation interval (e.g., 5m, 1h). If 0 or not set, runs once and exits.")
 	flag.IntVar(&healthPort, "health-port", 8080, "Health check server port")
 	flag.BoolVar(&skipInitial, "skip-initial", false,
 		"Skip initial validation (used with legacy sidecar mode where init container already validated)")
+	flag.IntVar(&maxConsecutiveFailures, "max-consecutive-failures", 0,
+		"Number of consecutive periodic validation failures after which readiness is revoked. "+
+			"0 means never revoke readiness once ready (fail-open).")
 	flag.Parse()
 
 	log.SetLogger(zap.New())
 	logger := log.Log.WithName("validation-agent")
 
-	logger.Info("Starting validation agent", "interval", interval, "healthPort", healthPort, "skipInitial", skipInitial)
+	logger.Info("Starting validation agent",
+		"interval", interval,
+		"healthPort", healthPort,
+		"skipInitial", skipInitial,
+		"maxConsecutiveFailures", maxConsecutiveFailures)
 
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -96,34 +104,71 @@ func main() {
 
 	// Continuous validation loop
 	if interval > 0 {
-		logger.Info("Starting continuous validation loop")
+		logger.Info("Starting continuous validation loop", "maxConsecutiveFailures", maxConsecutiveFailures)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				logger.Info("Running periodic validation")
-				if err := runValidation(ctx, validationArgs, logger, "periodic"); err != nil {
-					logger.Error(err, "Validation failed")
-					// Don't unmark ready - once ready, stay ready
-					// This allows the pod to continue running despite transient failures
-				} else {
-					logger.Info("Validation successful")
-					markReady() // Ensure ready state persists
-				}
-			case <-ctx.Done():
-				logger.Info("Shutting down gracefully")
-				<-healthServerDone
-				return
-			}
-		}
+		continuousValidationLoop(ctx, ticker.C, maxConsecutiveFailures, func() error {
+			return runValidation(ctx, validationArgs, logger, "periodic")
+		}, logger)
+
+		logger.Info("Shutting down gracefully")
+		<-healthServerDone
+		return
 	}
 	// One-shot mode: validation complete, exit immediately (for init containers)
 	logger.Info("One-shot validation complete, exiting")
 	cancel() // Trigger health server shutdown
 	<-healthServerDone
 	// Exit code 0 (success already handled, failures exit earlier at line 52)
+}
+
+// continuousValidationLoop runs validate on every tick until ctx is cancelled.
+// maxConsecutiveFailures controls when readiness is revoked after repeated
+// failures; see handleValidationResult for the exact semantics.
+func continuousValidationLoop(
+	ctx context.Context, tick <-chan time.Time, maxConsecutiveFailures int,
+	validate func() error, logger logr.Logger,
+) {
+	consecutiveFailures := 0
+	for {
+		select {
+		case <-tick:
+			logger.Info("Running periodic validation")
+			err := validate()
+			consecutiveFailures = handleValidationResult(err, consecutiveFailures, maxConsecutiveFailures)
+			if err != nil {
+				logger.Error(err, "Validation failed",
+					"consecutiveFailures", consecutiveFailures,
+					"maxConsecutiveFailures", maxConsecutiveFailures,
+					"ready", isReady())
+			} else {
+				logger.Info("Validation successful")
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// handleValidationResult updates readiness based on a validation outcome and
+// returns the new consecutive-failure count.
+//
+// On success the counter resets to 0 and the agent is marked ready. On failure
+// the counter increments; when maxConsecutiveFailures > 0 and the counter
+// reaches it, readiness is revoked (fail-closed). A maxConsecutiveFailures of 0
+// never revokes readiness (fail-open), preserving the legacy behavior.
+func handleValidationResult(err error, consecutiveFailures, maxConsecutiveFailures int) int {
+	if err == nil {
+		markReady()
+		return 0
+	}
+
+	consecutiveFailures++
+	if maxConsecutiveFailures > 0 && consecutiveFailures >= maxConsecutiveFailures {
+		markNotReady()
+	}
+	return consecutiveFailures
 }
 
 func runValidation(ctx context.Context, args []string, logger logr.Logger, validationType string) error {
@@ -164,10 +209,7 @@ func startHealthServer(ctx context.Context, port int, logger logr.Logger) {
 	})
 
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
-		readyMutex.RLock()
-		defer readyMutex.RUnlock()
-
-		if ready {
+		if isReady() {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ready"))
 		} else {
@@ -209,4 +251,16 @@ func markReady() {
 	readyMutex.Lock()
 	defer readyMutex.Unlock()
 	ready = true
+}
+
+func markNotReady() {
+	readyMutex.Lock()
+	defer readyMutex.Unlock()
+	ready = false
+}
+
+func isReady() bool {
+	readyMutex.RLock()
+	defer readyMutex.RUnlock()
+	return ready
 }

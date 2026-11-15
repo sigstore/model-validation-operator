@@ -13,6 +13,11 @@ spec:
   continuousValidation:
     enabled: true
     interval: "5m"
+    # Consecutive failed re-validations before the pod is removed from the
+    # Service endpoints. Defaults to 1 (fail-closed). Set to 0 to never revoke
+    # readiness once ready (legacy fail-open behavior), or higher to tolerate
+    # transient failures.
+    failureThreshold: 1
 ---
 apiVersion: v1
 kind: Pod
