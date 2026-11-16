@@ -5,6 +5,8 @@ metadata:
     alm-examples: '[]'
     capabilities: Seamless Upgrades
     containerImage: placeholder
+    operatorframework.io/suggested-namespace: model-validation-operator-system
+    operatorframework.io/suggested-namespace-template: '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"model-validation-operator-system","labels":{"openshift.io/cluster-monitoring":"true"}}}'
   name: model-validation-operator.v1.0.0
   namespace: placeholder
 spec:
@@ -38,6 +40,8 @@ spec:
     spec:
       deployments: null
     strategy: ""
+  # Controllers watch cluster-wide resources, so only AllNamespaces matches the
+  # operator's actual scope. Enable OwnNamespace only if namespace scoping is added.
   installModes:
   - supported: false
     type: OwnNamespace

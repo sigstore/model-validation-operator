@@ -20,7 +20,7 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     containerImage: ghcr.io/sigstore/model-validation-operator:v1.0.0
-    createdAt: "2026-11-11T12:01:34Z"
+    createdAt: "2026-11-11T15:58:13Z"
     operatorframework.io/suggested-namespace: model-validation-operator-system
     operatorframework.io/suggested-namespace-template: '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"model-validation-operator-system","labels":{"openshift.io/cluster-monitoring":"true"}}}'
     operators.operatorframework.io/builder: operator-sdk-v1.42.0
@@ -129,6 +129,17 @@ spec:
           - subjectaccessreviews
           verbs:
           - create
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - delete
         serviceAccountName: model-validation-controller-manager
       deployments:
       - label:
@@ -156,6 +167,7 @@ spec:
                 - --metrics-bind-address=:8443
                 - --leader-elect
                 - --health-probe-bind-address=:8081
+                - --enable-service-monitor
                 command:
                 - /manager
                 env:
