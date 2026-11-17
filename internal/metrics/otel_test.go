@@ -115,8 +115,10 @@ func findMetricFamily(
 	t *testing.T, families []*io_prometheus_client.MetricFamily, substring string,
 ) *io_prometheus_client.MetricFamily {
 	t.Helper()
+	norm := strings.ReplaceAll(substring, ".", "_")
 	for _, f := range families {
-		if strings.Contains(f.GetName(), substring) {
+		name := strings.ReplaceAll(f.GetName(), ".", "_")
+		if strings.Contains(name, norm) {
 			return f
 		}
 	}
