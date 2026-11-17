@@ -6,4 +6,26 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: modelvalidation-sample
 spec:
-  # TODO(user): Add fields here
+  model:
+    path: /models/example-model
+    signaturePath: /models/example-model.sigstore.json
+    ignorePaths: []
+    ignoreGitPaths: true
+    ignoreUnsignedFiles: false
+    allowSymlinks: false
+  config:
+    sigstoreConfig:
+      certificateIdentity: email:model@example.com
+      certificateOidcIssuer: https://accounts.google.com
+  continuousValidation:
+    enabled: false
+    interval: 5m
+    failureThreshold: 1
+  imagePullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi

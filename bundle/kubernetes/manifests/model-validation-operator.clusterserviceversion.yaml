@@ -15,12 +15,43 @@ metadata:
             "name": "modelvalidation-sample",
             "namespace": "model-validation-operator-system"
           },
-          "spec": null
+          "spec": {
+            "config": {
+              "sigstoreConfig": {
+                "certificateIdentity": "email:model@example.com",
+                "certificateOidcIssuer": "https://accounts.google.com"
+              }
+            },
+            "continuousValidation": {
+              "enabled": false,
+              "failureThreshold": 1,
+              "interval": "5m"
+            },
+            "imagePullPolicy": "IfNotPresent",
+            "model": {
+              "allowSymlinks": false,
+              "ignoreGitPaths": true,
+              "ignorePaths": [],
+              "ignoreUnsignedFiles": false,
+              "path": "/models/example-model",
+              "signaturePath": "/models/example-model.sigstore.json"
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            }
+          }
         }
       ]
     capabilities: Seamless Upgrades
     containerImage: ghcr.io/sigstore/model-validation-operator:v1.0.0
-    createdAt: "2026-11-11T15:58:12Z"
+    createdAt: "2026-11-16T12:26:37Z"
     operatorframework.io/suggested-namespace: model-validation-operator-system
     operatorframework.io/suggested-namespace-template: '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"model-validation-operator-system","labels":{"openshift.io/cluster-monitoring":"true"}}}'
     operators.operatorframework.io/builder: operator-sdk-v1.42.0
@@ -35,6 +66,95 @@ spec:
       displayName: Model Validation
       kind: ModelValidation
       name: modelvalidations.ml.sigstore.dev
+      specDescriptors:
+      - description: Model artifact paths and verification options.
+        displayName: Model
+        path: model
+      - description: Path to the model artifact, using a local path or supported URI.
+        displayName: Model Path
+        path: model.path
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Path to the model signature bundle.
+        displayName: Signature Path
+        path: model.signaturePath
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: File paths to exclude from model verification.
+        displayName: Ignore Paths
+        path: model.ignorePaths
+      - description: Ignore Git-related files during verification.
+        displayName: Ignore Git Paths
+        path: model.ignoreGitPaths
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+      - description: Allow files without signatures to be skipped.
+        displayName: Ignore Unsigned Files
+        path: model.ignoreUnsignedFiles
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+      - description: Follow symbolic links while verifying model files.
+        displayName: Allow Symlinks
+        path: model.allowSymlinks
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+      - description: Signature verification settings. Specify exactly one verification
+          method.
+        displayName: Verification Configuration
+        path: config
+      - description: Expected signing certificate identity.
+        displayName: Certificate Identity
+        path: config.sigstoreConfig.certificateIdentity
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: OIDC issuer for the signing certificate.
+        displayName: Certificate OIDC Issuer
+        path: config.sigstoreConfig.certificateOidcIssuer
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Path to the trusted certificate authority file.
+        displayName: Certificate Authority
+        path: config.pkiConfig.certificateAuthority
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Path to the public key used for verification.
+        displayName: Public Key Path
+        path: config.publicKeyConfig.keyPath
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Path to the client trust configuration file.
+        displayName: Trust Configuration Path
+        path: config.clientTrustConfig.trustConfigPath
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Pull policy for the validation container image.
+        displayName: Image Pull Policy
+        path: imagePullPolicy
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:imagePullPolicy
+      - description: Enable periodic model re-validation.
+        displayName: Enable Continuous Validation
+        path: continuousValidation.enabled
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+      - description: Interval between periodic validations, such as 5m or 1h.
+        displayName: Validation Interval
+        path: continuousValidation.interval
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Consecutive failures before the pod is marked not ready.
+        displayName: Failure Threshold
+        path: continuousValidation.failureThreshold
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:number
+      - description: Periodic validation settings.
+        displayName: Continuous Validation
+        path: continuousValidation
+      - description: CPU and memory requests and limits for the validation container.
+        displayName: Resource Requirements
+        path: resources
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:resourceRequirements
       version: v1alpha1
     - description: |-
         TelemetryConfig is the Schema for the telemetryconfigs API.
