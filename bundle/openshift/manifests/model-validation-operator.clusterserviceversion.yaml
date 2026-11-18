@@ -399,9 +399,8 @@ spec:
   webhookdefinitions:
   - admissionReviewVersions:
     - v1
-    deploymentName: model-validation-controller-manager
     containerPort: 9443
-    serviceName: model-validation-webhook
+    deploymentName: model-validation-controller-manager
     failurePolicy: Fail
     generateName: pods.validation.ml.sigstore.dev
     objectSelector:
@@ -418,6 +417,7 @@ spec:
       - UPDATE
       resources:
       - pods
+    serviceName: model-validation-webhook
     sideEffects: None
     type: MutatingAdmissionWebhook
     webhookPath: /mutate-v1-pod
