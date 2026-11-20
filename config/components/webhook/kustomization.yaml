@@ -5,6 +5,13 @@ resources:
 - ../../webhook
 
 patches:
+- patch: |-
+    - op: replace
+      path: /webhooks/0/clientConfig/service/name
+      value: model-validation-webhook
+  target:
+    kind: MutatingWebhookConfiguration
+    name: mutating-webhook-configuration
 - path: webhook-service.yaml
   target:
     kind: Service

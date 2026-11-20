@@ -1,0 +1,30 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: model-validation-operator.v1.0.0
+spec:
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1
+    containerPort: 9443
+    deploymentName: model-validation-controller-manager
+    failurePolicy: Fail
+    generateName: pods.validation.ml.sigstore.dev
+    objectSelector:
+      matchExpressions:
+      - key: validation.ml.sigstore.dev/ml
+        operator: Exists
+    rules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    serviceName: model-validation-webhook
+    sideEffects: None
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-v1-pod

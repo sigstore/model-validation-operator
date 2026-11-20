@@ -360,12 +360,29 @@ generate-bundle: manifests kustomize operator-sdk ## Generate and validate one O
 	cd config/overlays/$(BUNDLE_IMAGE_OVERLAY) && $(KUSTOMIZE) edit set image controller=$(IMG)
 	mkdir -p $(BUNDLE_DIR)
 	cd $(BUNDLE_DIR) && cp ../../PROJECT . && $(KUSTOMIZE) build ../../config/overlays/$(BUNDLE_OVERLAY) | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) --output-dir . --kustomize-dir ../../config/manifests && rm PROJECT
-	# Fix webhook configuration in CSV
-	@if [ -f $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml ]; then \
-		sed -i.bak 's/deploymentName: webhook/deploymentName: model-validation-controller-manager/' $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml && \
-		sed -i.bak2 's/deploymentName: model-validation-controller-manager/deploymentName: model-validation-controller-manager\n    containerPort: 9443\n    serviceName: model-validation-webhook/' $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml && \
-		rm -f $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml.bak $(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml.bak2; \
-	fi
+	# Reapply webhook definitions after Operator SDK regenerates them from webhook manifests.
+	@set -eu; \
+	patch_dir="$(BUNDLE_DIR)/.webhook-patch"; \
+	csv="$(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml"; \
+	mkdir -p "$$patch_dir"; \
+	cp "$$csv" "$$patch_dir/csv.yaml"; \
+	cp config/manifests/patches/webhook_definitions.yaml "$$patch_dir/webhook_definitions.yaml"; \
+	printf '%s\n' \
+		'apiVersion: kustomize.config.k8s.io/v1beta1' \
+		'kind: Kustomization' \
+		'resources:' \
+		'- csv.yaml' \
+		'patches:' \
+		'- path: webhook_definitions.yaml' \
+		'  target:' \
+		'    group: operators.coreos.com' \
+		'    version: v1alpha1' \
+		'    kind: ClusterServiceVersion' \
+		'    name: model-validation-operator.v1.0.0' \
+		> "$$patch_dir/kustomization.yaml"; \
+	$(KUSTOMIZE) build "$$patch_dir" > "$$csv.tmp"; \
+	mv "$$csv.tmp" "$$csv"; \
+	rm -rf "$$patch_dir"
 	$(OPERATOR_SDK) bundle validate $(BUNDLE_DIR)
 
 .PHONY: bundle
