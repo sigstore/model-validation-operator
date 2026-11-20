@@ -360,7 +360,8 @@ generate-bundle: manifests kustomize operator-sdk ## Generate and validate one O
 	cd config/overlays/$(BUNDLE_IMAGE_OVERLAY) && $(KUSTOMIZE) edit set image controller=$(IMG)
 	mkdir -p $(BUNDLE_DIR)
 	cd $(BUNDLE_DIR) && cp ../../PROJECT . && $(KUSTOMIZE) build ../../config/overlays/$(BUNDLE_OVERLAY) | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) --output-dir . --kustomize-dir ../../config/manifests && rm PROJECT
-	# Reapply webhook definitions after Operator SDK regenerates them from webhook manifests.
+	# Correct the port and service wiring of the webhook definitions Operator SDK derived from config/webhook.
+	# The CSV is targeted by kind only so the patch keeps applying when VERSION changes.
 	@set -eu; \
 	patch_dir="$(BUNDLE_DIR)/.webhook-patch"; \
 	csv="$(BUNDLE_DIR)/manifests/model-validation-operator.clusterserviceversion.yaml"; \
@@ -378,7 +379,6 @@ generate-bundle: manifests kustomize operator-sdk ## Generate and validate one O
 		'    group: operators.coreos.com' \
 		'    version: v1alpha1' \
 		'    kind: ClusterServiceVersion' \
-		'    name: model-validation-operator.v1.0.0' \
 		> "$$patch_dir/kustomization.yaml"; \
 	$(KUSTOMIZE) build "$$patch_dir" > "$$csv.tmp"; \
 	mv "$$csv.tmp" "$$csv"; \
