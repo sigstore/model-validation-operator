@@ -70,4 +70,5 @@ spec:
   provider:
     name: Sigstore
     url: https://sigstore.dev/
+  replaces: model-validation-operator.v0.1.1
   version: 1.0.0

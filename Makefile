@@ -408,43 +408,53 @@ bundle-push: ## Push the bundle image.
 OPM = $(LOCALBIN)/opm
 OPM_VERSION=v1.56.0
 opm: ## Download opm locally if necessary.
-ifeq (,$(wildcard $(OPM)))
+ifeq (,$(shell test -x "$(OPM)" && echo yes))
 ifeq (,$(shell which opm 2>/dev/null))
 	@{ \
 	set -e ;\
-	mkdir -p $(dir $(OPM)) ;\
+	mkdir -p "$(LOCALBIN)" ;\
 	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/$${OS}-$${ARCH}-opm ;\
-	chmod +x $(OPM) ;\
+	curl -sSLo "$(OPM)" https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/$${OS}-$${ARCH}-opm ;\
+	chmod +x "$(OPM)" ;\
 	}
 else
 OPM = $(shell which opm)
 endif
 endif
 
-# A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=ghcr.io/sigstore/model-validation-operator-bundle:v0.1.0,ghcr.io/sigstore/model-validation-operator-bundle:v0.2.0).
-# These images MUST exist in a registry and be pull-able.
-BUNDLE_IMGS ?= $(BUNDLE_IMG)
-
-# The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=ghcr.io/sigstore/model-validation-operator-catalog:v0.2.0).
+# Build the catalog image alongside the upstream operator images.
 CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)
+CATALOG_BUNDLE_IMG ?= $(BUNDLE_IMG)
+CATALOG_TEMPLATE ?= catalog/template.yaml
+CATALOG_FBC_DIR ?= build/catalog
+CATALOG_CHANNEL ?= stable
+CATALOG_BUNDLE_NAME ?= model-validation-operator.v$(VERSION)
+CATALOG_REPLACES ?= model-validation-operator.v0.1.1
 
-# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
-ifneq ($(origin CATALOG_BASE_IMG), undefined)
-FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
-endif
+.PHONY: catalog-render
+catalog-render: opm ## Render the FBC catalog template using the published bundle image.
+	mkdir -p $(CATALOG_FBC_DIR)
+	sed \
+		-e 's|@@BUNDLE_IMAGE@@|$(CATALOG_BUNDLE_IMG)|g' \
+		-e 's|@@BUNDLE_NAME@@|$(CATALOG_BUNDLE_NAME)|g' \
+		-e 's|@@CHANNEL@@|$(CATALOG_CHANNEL)|g' \
+		-e 's|@@PREVIOUS_BUNDLE_NAME@@|$(CATALOG_REPLACES)|g' \
+		$(CATALOG_TEMPLATE) > $(CATALOG_FBC_DIR)/template.yaml
+	"$(OPM)" alpha render-template basic $(CATALOG_FBC_DIR)/template.yaml -o yaml > $(CATALOG_FBC_DIR)/index.yaml
 
-# Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
-# This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
-# https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
+.PHONY: catalog-validate
+catalog-validate: catalog-render ## Validate the rendered FBC catalog.
+	"$(OPM)" validate $(CATALOG_FBC_DIR)
+
 .PHONY: catalog-build
-catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool ${CONTAINER_TOOL} --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+catalog-build: catalog-validate ## Build an FBC catalog image.
+	rm -f $(CATALOG_FBC_DIR).Dockerfile
+	"$(OPM)" generate dockerfile $(CATALOG_FBC_DIR)
+	$(CONTAINER_TOOL) build -f $(CATALOG_FBC_DIR).Dockerfile -t $(CATALOG_IMG) .
 
-# Push the catalog image.
 .PHONY: catalog-push
-catalog-push: ## Push a catalog image.
-	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+catalog-push: catalog-build ## Build and push an FBC catalog image.
+	$(CONTAINER_TOOL) push $(CATALOG_IMG)
 
 ##@ Overlay Deployment
 
