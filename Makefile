@@ -135,6 +135,16 @@ test: manifests generate fmt vet setup-envtest test-tracing ## Run tests.
 test-tracing: ## Run tracing package tests.
 	cd pkg/tracing && go test ./...
 
+.PHONY: test-alerts
+test-alerts: promtool ## Validate and unit-test the PrometheusRule alert and SLO rules.
+	@# promtool reads plain rule groups, not the PrometheusRule wrapper, so extract spec.groups first.
+	@python3 -c "import sys,yaml; \
+		d=yaml.safe_load(open('config/prometheus/alerts.yaml')); \
+		yaml.safe_dump({'groups': d['spec']['groups']}, open('$(LOCALBIN)/alerts-rules.yaml','w'), sort_keys=False)"
+	@cp config/prometheus/alerts_test.yaml $(LOCALBIN)/alerts_test.yaml
+	$(PROMTOOL) check rules $(LOCALBIN)/alerts-rules.yaml
+	cd $(LOCALBIN) && ./promtool test rules alerts_test.yaml
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
@@ -282,6 +292,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+PROMTOOL ?= $(LOCALBIN)/promtool
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.0
@@ -290,6 +301,24 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.4.0
+# promtool ships only as part of the Prometheus release archive. It cannot be
+# installed with `go install` because prometheus/prometheus carries replace
+# directives, so it is fetched from the release tarball instead.
+PROMTOOL_VERSION ?= 2.54.1
+
+.PHONY: promtool
+promtool: $(PROMTOOL) ## Download promtool locally if necessary.
+$(PROMTOOL): $(LOCALBIN)
+	@[ -f "$(PROMTOOL)-$(PROMTOOL_VERSION)" ] || { \
+	set -e ;\
+	echo "Downloading promtool $(PROMTOOL_VERSION)" ;\
+	tmp=$$(mktemp -d) ;\
+	arch=$$(go env GOARCH) ; os=$$(go env GOOS) ;\
+	curl -sSfL "https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$${os}-$${arch}.tar.gz" | tar xz -C $$tmp ;\
+	mv "$$tmp/prometheus-$(PROMTOOL_VERSION).$${os}-$${arch}/promtool" "$(PROMTOOL)-$(PROMTOOL_VERSION)" ;\
+	rm -rf $$tmp ;\
+	}
+	@ln -sf $(PROMTOOL)-$(PROMTOOL_VERSION) $(PROMTOOL)
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

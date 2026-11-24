@@ -1,0 +1,181 @@
+rule_files:
+  - alerts-rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # 20% of status updates fail: above the 14.4x fast-burn threshold (0.144)
+  # on both the 5m and 1h windows.
+  - interval: 1m
+    name: availability fast burn fires on sustained 20% failure rate
+    input_series:
+      - series: 'model_validation_operator_status_updates_total{result="success",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+8x180'
+      - series: 'model_validation_operator_status_updates_total{result="failure",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+2x180'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: MVOStatusUpdateErrorBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: model-validation-operator
+              slo: status-update-availability
+            exp_annotations:
+              summary: ModelValidation status updates are burning the availability error budget fast
+              description: "Status updates are failing at 20% over both the 5m and 1h windows, which is 14.4x the rate the 99% availability SLO allows. At this rate 2% of the 30-day error budget is consumed within an hour. ModelValidation resources are not reflecting the true state of their pods."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdateerrorbudgetburnfast
+      # The symptom alert covers the same condition at warning level.
+      - eval_time: 90m
+        alertname: MVOStatusUpdateFailureRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: model-validation-operator
+            exp_annotations:
+              summary: ModelValidation status updates are failing
+              description: "20% of status updates have failed over the last 5 minutes. This is an early symptom alert; if it persists the availability burn-rate alerts will escalate it to critical."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatefailurerate
+
+  # 8% failures: above the 6x slow-burn threshold (0.06) but below the
+  # 14.4x fast-burn threshold, so only the slow burn fires.
+  - interval: 1m
+    name: 8 percent failures trigger slow burn but not fast burn
+    input_series:
+      - series: 'model_validation_operator_status_updates_total{result="success",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+92x600'
+      - series: 'model_validation_operator_status_updates_total{result="failure",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+8x600'
+    alert_rule_test:
+      - eval_time: 480m
+        alertname: MVOStatusUpdateErrorBudgetBurnFast
+        exp_alerts: []
+      - eval_time: 480m
+        alertname: MVOStatusUpdateErrorBudgetBurnSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: model-validation-operator
+              slo: status-update-availability
+            exp_annotations:
+              summary: ModelValidation status updates are steadily burning the availability error budget
+              description: "Status updates are failing at 8% over both the 30m and 6h windows, which is 6x the rate the 99% availability SLO allows. Sustained at this rate the 30-day error budget is exhausted in about five days."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdateerrorbudgetburnslow
+
+  # An idle operator must neither alert nor burn budget. The counters exist
+  # but never increment, so the SLI ratio is 0/0 = NaN.
+  - interval: 1m
+    name: idle operator fires nothing
+    input_series:
+      - series: 'model_validation_operator_status_updates_total{result="success",exported_namespace="ns1",model_validation="mv1"}'
+        values: '100x180'
+      - series: 'model_validation_operator_status_updates_total{result="failure",exported_namespace="ns1",model_validation="mv1"}'
+        values: '5x180'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: MVOStatusUpdateErrorBudgetBurnFast
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: MVOStatusUpdateErrorBudgetBurnSlow
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: MVOStatusUpdateFailureRate
+        exp_alerts: []
+
+  # Latency SLI: 25% of updates land in the 2.5s bucket, so 25% exceed the
+  # 1s objective, well above the fast-burn threshold.
+  - interval: 1m
+    name: latency fast burn fires when a quarter of updates exceed 1s
+    input_series:
+      - series: 'model_validation_operator_status_update_duration_seconds_bucket{le="1",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+3x180'
+      - series: 'model_validation_operator_status_update_duration_seconds_bucket{le="2.5",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+4x180'
+      - series: 'model_validation_operator_status_update_duration_seconds_bucket{le="+Inf",exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+4x180'
+      - series: 'model_validation_operator_status_update_duration_seconds_count{exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+4x180'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: MVOStatusUpdateLatencyBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: model-validation-operator
+              slo: status-update-latency
+            exp_annotations:
+              summary: ModelValidation status updates are burning the latency error budget fast
+              description: "25% of status updates are taking longer than the 1s objective over both the 5m and 1h windows, 14.4x the rate the 99% latency SLO allows. Check API server latency and the status update queue depth."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatelatencybudgetburnfast
+
+  # Configuration drift: 0.5 events/s, above the 0.1 threshold. Verifies the
+  # per-CR grouping carries exported_namespace, model_validation and drift_type
+  # through to the alert labels.
+  - interval: 1m
+    name: configuration drift alert fires per CR with drift type
+    input_series:
+      - series: 'model_validation_operator_configuration_drift_events_total{exported_namespace="ns1",model_validation="mv1",drift_type="config_hash_mismatch",namespace="model-validation-operator-system"}'
+        values: '0+30x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MVOHighConfigurationDriftRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: model-validation-operator
+              exported_namespace: ns1
+              model_validation: mv1
+              drift_type: config_hash_mismatch
+            exp_annotations:
+              summary: High configuration drift rate for a ModelValidation
+              description: "ModelValidation ns1/mv1 is reporting 0.50 drift events per second of type \"config_hash_mismatch\". Running pods are validating against a configuration that no longer matches the CR, so they are not protected by the current policy."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/configuration-drift.md
+
+  # Queue backlog: the gauge is unlabelled, so the alert carries only its own labels.
+  - interval: 1m
+    name: queue backlog alert fires above 50 items
+    input_series:
+      - series: 'model_validation_operator_status_update_queue_size'
+        values: '75x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MVOStatusUpdateQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: model-validation-operator
+            exp_annotations:
+              summary: ModelValidation status update queue is backing up
+              description: "The status update queue has held more than 50 items for 10 minutes (currently 75). Status updates are falling behind the rate of incoming pod events, so reported state is increasingly stale."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatequeuebacklog
+
+  # A queue that sits just under the threshold must stay quiet.
+  - interval: 1m
+    name: queue at threshold does not alert
+    input_series:
+      - series: 'model_validation_operator_status_update_queue_size'
+        values: '50x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MVOStatusUpdateQueueBacklog
+        exp_alerts: []
+
+  # Retry storm: 2 retries/s for one CR, above the 1/s threshold.
+  - interval: 1m
+    name: high retry attempts alert fires per CR
+    input_series:
+      - series: 'model_validation_operator_status_update_retry_attempts_total{exported_namespace="ns1",model_validation="mv1"}'
+        values: '0+120x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MVOHighRetryAttempts
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: model-validation-operator
+              exported_namespace: ns1
+              model_validation: mv1
+            exp_annotations:
+              summary: Excessive status update retries for a ModelValidation
+              description: "ModelValidation ns1/mv1 is retrying status updates 2.00 times per second. Sustained retries usually point at API server pressure or conflicting writes on the CR."
+              runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvohighretryattempts
