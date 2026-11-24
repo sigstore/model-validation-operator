@@ -1,30 +1,19 @@
-apiVersion: operators.coreos.com/v1alpha1
-kind: ClusterServiceVersion
-metadata:
-  name: model-validation-operator.v1.0.0
-spec:
-  webhookdefinitions:
-  - admissionReviewVersions:
-    - v1
-    containerPort: 9443
-    deploymentName: model-validation-controller-manager
-    failurePolicy: Fail
-    generateName: pods.validation.ml.sigstore.dev
-    objectSelector:
-      matchExpressions:
-      - key: validation.ml.sigstore.dev/ml
-        operator: Exists
-    rules:
-    - apiGroups:
-      - ""
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - pods
-    serviceName: model-validation-webhook
-    sideEffects: None
-    type: MutatingAdmissionWebhook
-    webhookPath: /mutate-v1-pod
+# JSON6902 patch applied to the generated CSV by `make generate-bundle`, after
+# `operator-sdk generate bundle` derives spec.webhookdefinitions from the
+# MutatingWebhookConfiguration in config/webhook. Operator SDK already gets the
+# rules, selectors, failure policy and deployment name right; only the port
+# and service wiring need correcting, so nothing else is duplicated here.
+#
+# The `test` op makes generation fail loudly if a webhook is added or
+# reordered, instead of silently patching the wrong entry.
+- op: test
+  path: /spec/webhookdefinitions/0/generateName
+  value: pods.validation.ml.sigstore.dev
+- op: replace
+  path: /spec/webhookdefinitions/0/containerPort
+  value: 9443
+- op: remove
+  path: /spec/webhookdefinitions/0/targetPort
+- op: add
+  path: /spec/webhookdefinitions/0/serviceName
+  value: model-validation-webhook
