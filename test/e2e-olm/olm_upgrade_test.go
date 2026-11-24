@@ -51,11 +51,16 @@ func envOrDefault(key, defaultValue string) string {
 
 var _ = Describe("OLM Upgrade", Ordered, func() {
 	var (
-		baseCatalogImage   string
-		targetCatalogImage string
-		channelName        string
-		packageName        string
-		baseCSV            string
+		baseCatalogImage       string
+		targetCatalogImage     string
+		channelName            string
+		packageName            string
+		expectedBaseCSV        string
+		expectedTargetCSV      string
+		expectedBaseVersion    string
+		expectedTargetVersion  string
+		expectedTargetReplaces string
+		baseCSV                string
 	)
 
 	const (
@@ -72,14 +77,25 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 		targetCatalogImage = os.Getenv("TEST_TARGET_CATALOG")
 		Expect(targetCatalogImage).NotTo(BeEmpty(), "TEST_TARGET_CATALOG env var must be set")
 
-		channelName = envOrDefault("OLM_CHANNEL", "tech-preview")
+		channelName = envOrDefault("OLM_CHANNEL", "stable")
 		packageName = envOrDefault("OLM_PACKAGE", "model-validation-operator")
+		expectedBaseCSV = os.Getenv("OLM_EXPECTED_BASE_CSV")
+		expectedTargetCSV = os.Getenv("OLM_EXPECTED_TARGET_CSV")
+		expectedBaseVersion = os.Getenv("OLM_EXPECTED_BASE_VERSION")
+		expectedTargetVersion = os.Getenv("OLM_EXPECTED_TARGET_VERSION")
+		expectedTargetReplaces = os.Getenv("OLM_EXPECTED_TARGET_REPLACES")
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "OLM Upgrade Test Configuration:\n")
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Base catalog: %s\n", baseCatalogImage)
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Target catalog: %s\n", targetCatalogImage)
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Channel: %s\n", channelName)
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Package: %s\n", packageName)
+		if expectedBaseCSV != "" {
+			_, _ = fmt.Fprintf(GinkgoWriter, "  Expected base CSV: %s\n", expectedBaseCSV)
+		}
+		if expectedTargetCSV != "" {
+			_, _ = fmt.Fprintf(GinkgoWriter, "  Expected target CSV: %s\n", expectedTargetCSV)
+		}
 
 		DeferCleanup(func() {
 			By("cleaning up OLM test resources")
@@ -133,11 +149,20 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 				"jsonpath={.status.installedCSV}")
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(csv).NotTo(BeEmpty())
+			if expectedBaseCSV != "" {
+				g.Expect(csv).To(Equal(expectedBaseCSV))
+			}
 			baseCSV = csv
 		}, 5*time.Minute, 5*time.Second).Should(Succeed(),
 			"Subscription should report an installed CSV")
 
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Installed base CSV: %s\n", baseCSV)
+		if expectedBaseVersion != "" {
+			version, err := utils.KubectlGet("csv", baseCSV, operatorNamespace,
+				"jsonpath={.spec.version}")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(expectedBaseVersion))
+		}
 
 		By(fmt.Sprintf("waiting for base CSV %s to reach Succeeded phase", baseCSV))
 		Eventually(func(g Gomega) {
@@ -191,7 +216,7 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 			"Init container should be injected")
 	})
 
-	It("should upgrade when the catalog is updated", func() {
+	It("should upgrade from one stable release to the next", func() {
 		By("capturing the pre-upgrade controller image")
 		var preUpgradeImage string
 		Eventually(func(g Gomega) {
@@ -225,6 +250,9 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(csv).NotTo(BeEmpty())
 			g.Expect(csv).NotTo(Equal(baseCSV), "installed CSV should change after upgrade")
+			if expectedTargetCSV != "" {
+				g.Expect(csv).To(Equal(expectedTargetCSV))
+			}
 		}, 5*time.Minute, 10*time.Second).Should(Succeed(),
 			"Subscription should report a new installed CSV after upgrade")
 
@@ -232,6 +260,18 @@ var _ = Describe("OLM Upgrade", Ordered, func() {
 		upgradeCSV, err = utils.KubectlGet("subscription", subscriptionName, operatorNamespace,
 			"jsonpath={.status.installedCSV}")
 		Expect(err).NotTo(HaveOccurred())
+		if expectedTargetVersion != "" {
+			version, err := utils.KubectlGet("csv", upgradeCSV, operatorNamespace,
+				"jsonpath={.spec.version}")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).To(Equal(expectedTargetVersion))
+		}
+		if expectedTargetReplaces != "" {
+			replaces, err := utils.KubectlGet("csv", upgradeCSV, operatorNamespace,
+				"jsonpath={.spec.replaces}")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(replaces).To(Equal(expectedTargetReplaces))
+		}
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Upgraded CSV: %s (was: %s)\n", upgradeCSV, baseCSV)
 
 		By(fmt.Sprintf("waiting for upgrade CSV %s to reach Succeeded phase", upgradeCSV))

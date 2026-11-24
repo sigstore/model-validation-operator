@@ -46,6 +46,7 @@ jobs:
       AGENT_IMG: ghcr.io/sigstore/model-validation-operator-agent:dev-${{ github.sha }}
       BUNDLE_IMG: ghcr.io/sigstore/model-validation-operator-bundle:dev-${{ github.sha }}
       CATALOG_IMG: ghcr.io/sigstore/model-validation-operator-catalog:dev-${{ github.sha }}
+      FBC_CATALOG_IMG: ghcr.io/sigstore/model-validation-operator-fbc-catalog:dev-${{ github.sha }}
       BASE_IMG: ghcr.io/sigstore/model-validation-operator:olm-base-${{ github.sha }}
       BASE_AGENT_IMG: ghcr.io/sigstore/model-validation-operator-agent:olm-base-${{ github.sha }}
       BASE_BUNDLE_IMG: ghcr.io/sigstore/model-validation-operator-bundle:olm-base-${{ github.sha }}
@@ -99,6 +100,11 @@ jobs:
           NEXT=$(echo "$CURRENT" | awk -F. '{print $1"."$2"."$3+1}')
           echo "OLM_BASE_VERSION=$CURRENT" >> "$GITHUB_ENV"
           echo "OLM_UPGRADE_VERSION=$NEXT" >> "$GITHUB_ENV"
+          echo "OLM_EXPECTED_BASE_CSV=model-validation-operator.v$CURRENT" >> "$GITHUB_ENV"
+          echo "OLM_EXPECTED_TARGET_CSV=model-validation-operator.v$NEXT" >> "$GITHUB_ENV"
+          echo "OLM_EXPECTED_BASE_VERSION=$CURRENT" >> "$GITHUB_ENV"
+          echo "OLM_EXPECTED_TARGET_VERSION=$NEXT" >> "$GITHUB_ENV"
+          echo "OLM_EXPECTED_TARGET_REPLACES=model-validation-operator.v$CURRENT" >> "$GITHUB_ENV"
 
       - name: Set local OLM image references
         run: |
@@ -110,6 +116,7 @@ jobs:
           echo "BUNDLE_IMG_LOCAL=$LOCAL_REGISTRY/${BUNDLE_IMG#ghcr.io/}" >> "$GITHUB_ENV"
           echo "BASE_CATALOG_IMG_LOCAL=$LOCAL_REGISTRY/${BASE_CATALOG_IMG#ghcr.io/}" >> "$GITHUB_ENV"
           echo "CATALOG_IMG_LOCAL=$LOCAL_REGISTRY/${CATALOG_IMG#ghcr.io/}" >> "$GITHUB_ENV"
+          echo "FBC_CATALOG_IMG_LOCAL=$LOCAL_REGISTRY/${FBC_CATALOG_IMG#ghcr.io/}" >> "$GITHUB_ENV"
 
       - name: Build base operator image
         run: |
@@ -125,20 +132,27 @@ jobs:
 
       - name: Build base bundle
         run: |
-          make bundle bundle-build IMG="$BASE_IMG_LOCAL" AGENT_IMG="$BASE_AGENT_IMG_LOCAL" BUNDLE_IMG="$BASE_BUNDLE_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CHANNELS=tech-preview DEFAULT_CHANNEL=tech-preview
+          make bundle IMG="$BASE_IMG_LOCAL" AGENT_IMG="$BASE_AGENT_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CHANNELS=stable DEFAULT_CHANNEL=stable
+          make bundle-build IMG="$BASE_IMG_LOCAL" AGENT_IMG="$BASE_AGENT_IMG_LOCAL" BUNDLE_IMG="$BASE_BUNDLE_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CHANNELS=stable DEFAULT_CHANNEL=stable
           podman push --tls-verify=false "$BASE_BUNDLE_IMG_LOCAL"
 
       - name: Build target bundle
         run: |
-          make bundle bundle-build IMG="$IMG_LOCAL" AGENT_IMG="$AGENT_IMG_LOCAL" BUNDLE_IMG="$BUNDLE_IMG_LOCAL" VERSION=$OLM_UPGRADE_VERSION CHANNELS=tech-preview DEFAULT_CHANNEL=tech-preview
+          make bundle IMG="$IMG_LOCAL" AGENT_IMG="$AGENT_IMG_LOCAL" VERSION=$OLM_UPGRADE_VERSION CHANNELS=stable DEFAULT_CHANNEL=stable
+          sed -i "s|^  replaces: model-validation-operator.v0.1.1$|  replaces: model-validation-operator.v$OLM_BASE_VERSION|" bundle/kubernetes/manifests/model-validation-operator.clusterserviceversion.yaml
+          make bundle-build IMG="$IMG_LOCAL" AGENT_IMG="$AGENT_IMG_LOCAL" BUNDLE_IMG="$BUNDLE_IMG_LOCAL" VERSION=$OLM_UPGRADE_VERSION CHANNELS=stable DEFAULT_CHANNEL=stable
           podman push --tls-verify=false "$BUNDLE_IMG_LOCAL"
 
-      - name: Build base and target catalogs
+      - name: Build FBC and OPM index catalogs
         run: |
+          # OPM pulls bundle metadata while rendering; kind's local registry serves HTTP only.
+          make catalog-build CATALOG_IMG="$FBC_CATALOG_IMG_LOCAL" CATALOG_BUNDLE_IMG="$BASE_BUNDLE_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CATALOG_CHANNEL=stable CATALOG_REPLACES=model-validation-operator.v0.1.1 CATALOG_RENDER_FLAGS=--use-http
           make opm
-          make catalog-build CATALOG_IMG="$BASE_CATALOG_IMG_LOCAL" BUNDLE_IMGS="$BASE_BUNDLE_IMG_LOCAL"
+          OPM_BIN="$(command -v opm || true)"
+          if [[ -z "$OPM_BIN" ]]; then OPM_BIN="$(pwd)/bin/opm"; fi
+          "$OPM_BIN" index add --container-tool podman --mode semver --tag "$BASE_CATALOG_IMG_LOCAL" --bundles "$BASE_BUNDLE_IMG_LOCAL"
           podman push --tls-verify=false "$BASE_CATALOG_IMG_LOCAL"
-          make catalog-build CATALOG_IMG="$CATALOG_IMG_LOCAL" BUNDLE_IMGS="$BUNDLE_IMG_LOCAL" CATALOG_BASE_IMG="$BASE_CATALOG_IMG_LOCAL"
+          "$OPM_BIN" index add --container-tool podman --mode semver --tag "$CATALOG_IMG_LOCAL" --bundles "$BUNDLE_IMG_LOCAL" --from-index "$BASE_CATALOG_IMG_LOCAL"
           podman push --tls-verify=false "$CATALOG_IMG_LOCAL"
 
       - name: Install OLM

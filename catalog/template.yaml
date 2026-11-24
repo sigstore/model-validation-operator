@@ -1,0 +1,13 @@
+schema: olm.template.basic
+entries:
+  - schema: olm.package
+    name: model-validation-operator
+    defaultChannel: "@@CHANNEL@@"
+  - schema: olm.channel
+    package: model-validation-operator
+    name: "@@CHANNEL@@"
+    entries:
+      - name: "@@BUNDLE_NAME@@"
+        replaces: "@@PREVIOUS_BUNDLE_NAME@@"
+  - schema: olm.bundle
+    image: "@@BUNDLE_IMAGE@@"
