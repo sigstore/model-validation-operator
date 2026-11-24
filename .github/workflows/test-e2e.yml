@@ -145,7 +145,8 @@ jobs:
 
       - name: Build FBC and OPM index catalogs
         run: |
-          make catalog-build CATALOG_IMG="$FBC_CATALOG_IMG_LOCAL" CATALOG_BUNDLE_IMG="$BASE_BUNDLE_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CATALOG_CHANNEL=stable CATALOG_REPLACES=model-validation-operator.v0.1.1
+          # OPM pulls bundle metadata while rendering; kind's local registry serves HTTP only.
+          make catalog-build CATALOG_IMG="$FBC_CATALOG_IMG_LOCAL" CATALOG_BUNDLE_IMG="$BASE_BUNDLE_IMG_LOCAL" VERSION=$OLM_BASE_VERSION CATALOG_CHANNEL=stable CATALOG_REPLACES=model-validation-operator.v0.1.1 CATALOG_RENDER_FLAGS=--use-http
           make opm
           OPM_BIN="$(command -v opm || true)"
           if [[ -z "$OPM_BIN" ]]; then OPM_BIN="$(pwd)/bin/opm"; fi

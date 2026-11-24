@@ -430,6 +430,7 @@ CATALOG_FBC_DIR ?= build/catalog
 CATALOG_CHANNEL ?= stable
 CATALOG_BUNDLE_NAME ?= model-validation-operator.v$(VERSION)
 CATALOG_REPLACES ?= model-validation-operator.v0.1.1
+CATALOG_RENDER_FLAGS ?=
 
 .PHONY: catalog-render
 catalog-render: opm ## Render the FBC catalog template using the published bundle image.
@@ -440,7 +441,7 @@ catalog-render: opm ## Render the FBC catalog template using the published bundl
 		-e 's|@@CHANNEL@@|$(CATALOG_CHANNEL)|g' \
 		-e 's|@@PREVIOUS_BUNDLE_NAME@@|$(CATALOG_REPLACES)|g' \
 		$(CATALOG_TEMPLATE) > $(CATALOG_FBC_DIR)/template.yaml
-	"$(OPM)" alpha render-template basic $(CATALOG_FBC_DIR)/template.yaml -o yaml > $(CATALOG_FBC_DIR)/index.yaml
+	"$(OPM)" alpha render-template basic $(CATALOG_FBC_DIR)/template.yaml -o yaml $(CATALOG_RENDER_FLAGS) > $(CATALOG_FBC_DIR)/index.yaml
 
 .PHONY: catalog-validate
 catalog-validate: catalog-render ## Validate the rendered FBC catalog.
