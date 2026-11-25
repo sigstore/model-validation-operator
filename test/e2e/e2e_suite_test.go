@@ -118,7 +118,7 @@ var _ = AfterSuite(func() {
 	}
 	if err := utils.KubectlDelete(curlPodTemplate, &utils.KubectlDeleteOptions{
 		IgnoreNotFound: true,
-		Timeout:        "30s",
+		Timeout:        "60s",
 		TemplateData:   cleanupTemplateData,
 	}); err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to cleanup metrics pod: %s\n", err)

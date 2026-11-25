@@ -17,8 +17,12 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
+	"text/template"
 	"time"
 
 	_ "embed"
@@ -41,6 +45,67 @@ func defaultValidationPodData(podName, namespace, modelName string) utils.PodTem
 
 var _ = Describe("ModelValidation Success/Failure Scenarios", Ordered, func() {
 	Context("Validation Success and Failure", func() {
+		It("should remove a terminating pod after its ModelValidation is deleted", func(ctx SpecContext) {
+			const modelName = "cleanup-after-cr-deletion"
+			const podName = "cleanup-after-cr-deletion-pod"
+			modelData := utils.CRTemplateData{ModelName: modelName, Namespace: validationTestNamespace}
+			podData := defaultValidationPodData(podName, validationTestNamespace, modelName)
+			kubectl := func(ctx context.Context, input string, args ...string) (string, error) {
+				commandCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+				defer cancel()
+				args = append([]string{"--request-timeout=10s", "-n", validationTestNamespace}, args...)
+				cmd := exec.CommandContext(commandCtx, "kubectl", args...)
+				cmd.Stdin = strings.NewReader(input)
+				return utils.Run(cmd)
+			}
+			apply := func(ctx context.Context, source []byte, data any) {
+				var manifest strings.Builder
+				tmpl, err := template.New("cleanup").Parse(string(source))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(tmpl.Execute(&manifest, data)).To(Succeed())
+				_, err = kubectl(ctx, manifest.String(), "apply", "-f", "-")
+				Expect(err).NotTo(HaveOccurred())
+			}
+			DeferCleanup(func(cleanupCtx SpecContext) {
+				// Restore the CR so finalizer cleanup also works when this regression fails.
+				apply(cleanupCtx, modelValidationTemplate, modelData)
+				_, err := kubectl(cleanupCtx, "", "delete", "pod", podName, "--ignore-not-found=true", "--timeout=30s")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = kubectl(cleanupCtx, "", "delete", "modelvalidation", modelName,
+					"--ignore-not-found=true", "--timeout=30s")
+				Expect(err).NotTo(HaveOccurred())
+			}, NodeTimeout(90*time.Second))
+
+			By("creating a ModelValidation and a Pod referencing it")
+			apply(ctx, modelValidationTemplate, modelData)
+			apply(ctx, podTemplate, podData)
+
+			By("verifying the webhook injected validation and added its finalizer")
+			Eventually(ctx, func(g Gomega) {
+				output, err := kubectl(ctx, "", "get", "pod", podName, "-o", "json")
+				g.Expect(err).NotTo(HaveOccurred())
+				var pod corev1.Pod
+				g.Expect(json.Unmarshal([]byte(output), &pod)).To(Succeed())
+				g.Expect(utils.HasValidationContainer(&pod)).To(BeTrue())
+				g.Expect(pod.Finalizers).To(ContainElement(constants.ModelValidationFinalizer))
+			}, 30*time.Second, time.Second).Should(Succeed())
+
+			By("deleting the ModelValidation before its Pod")
+			_, err := kubectl(ctx, "", "delete", "modelvalidation", modelName, "--wait=true", "--timeout=30s")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("requesting Pod deletion while the referenced configuration is absent")
+			_, err = kubectl(ctx, "", "delete", "pod", podName, "--wait=false")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for the controller to remove the finalizer and the Pod to disappear")
+			Eventually(ctx, func(g Gomega) {
+				output, err := kubectl(ctx, "", "get", "pod", podName, "--ignore-not-found=true", "-o", "name")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(strings.TrimSpace(output)).To(BeEmpty())
+			}, time.Minute, time.Second).Should(Succeed())
+		}, SpecTimeout(2*time.Minute))
+
 		It("should fail validation with invalid signature (current test model)", func() {
 			podName := "failure-test-pod"
 
