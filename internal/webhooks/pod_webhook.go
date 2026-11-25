@@ -25,6 +25,7 @@ import (
 
 	"github.com/sigstore/model-validation-operator/internal/constants"
 	"github.com/sigstore/model-validation-operator/internal/metrics"
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,6 +81,19 @@ func (p *podInterceptor) Handle(ctx context.Context, req admission.Request) (res
 	if err := p.decoder.Decode(req, pod); err != nil {
 		logger.Error(err, "failed to decode pod")
 		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	// Finalizer removal must not depend on a ModelValidation that may already
+	// have been deleted. The API server's old object confirms that this is the
+	// same Pod and it was already terminating before this update.
+	if req.Operation == admissionv1.Update && !pod.DeletionTimestamp.IsZero() {
+		oldPod := &corev1.Pod{}
+		if err := p.decoder.DecodeRaw(req.OldObject, oldPod); err != nil {
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+		if !oldPod.DeletionTimestamp.IsZero() && oldPod.UID != "" && oldPod.UID == pod.UID {
+			return admission.Allowed("terminating pod cleanup, no injection needed")
+		}
 	}
 
 	// Check if namespace should be ignored
