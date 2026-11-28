@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sigstore/model-validation-operator/internal/validation"
+	"github.com/sigstore/model-validation-operator/internal/watcher"
 	"github.com/sigstore/model-validation-operator/pkg/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -35,6 +36,7 @@ func main() {
 	var healthPort int
 	var skipInitial bool
 	var maxConsecutiveFailures int
+	var watch bool
 
 	flag.DurationVar(&interval, "interval", 0, "Validation interval (e.g., 5m, 1h). If 0 or not set, runs once and exits.")
 	flag.IntVar(&healthPort, "health-port", 8080, "Health check server port")
@@ -43,6 +45,10 @@ func main() {
 	flag.IntVar(&maxConsecutiveFailures, "max-consecutive-failures", 0,
 		"Number of consecutive periodic validation failures after which readiness is revoked. "+
 			"0 means never revoke readiness once ready (fail-open).")
+	flag.BoolVar(&watch, "watch", false,
+		"Watch model path for file changes using inotify and re-validate on change. "+
+			"Works on local/block storage (NVMe, SSD, Ceph RBD, etc). "+
+			"Not supported on network filesystems (NFS, CIFS) — use --interval as fallback.")
 	flag.Parse()
 
 	log.SetLogger(zap.New())
@@ -52,7 +58,8 @@ func main() {
 		"interval", interval,
 		"healthPort", healthPort,
 		"skipInitial", skipInitial,
-		"maxConsecutiveFailures", maxConsecutiveFailures)
+		"maxConsecutiveFailures", maxConsecutiveFailures,
+		"watch", watch)
 
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -108,8 +115,23 @@ func main() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		continuousValidationLoop(ctx, ticker.C, maxConsecutiveFailures, func() error {
-			return runValidation(ctx, validationArgs, logger, "periodic")
+		var watchCh <-chan struct{}
+		if watch {
+			cfg, parseErr := validation.ParseArgs(validationArgs)
+			if parseErr != nil {
+				logger.Error(parseErr, "Failed to parse args for file watcher, continuing without watch")
+			} else {
+				fw := watcher.New(cfg.ModelPath, logger)
+				var watchErr error
+				watchCh, watchErr = fw.Run(ctx)
+				if watchErr != nil {
+					logger.Error(watchErr, "Failed to start file watcher, continuing with interval-only")
+				}
+			}
+		}
+
+		continuousValidationLoop(ctx, ticker.C, watchCh, maxConsecutiveFailures, func(validationType string) error {
+			return runValidation(ctx, validationArgs, logger, validationType)
 		}, logger)
 
 		logger.Info("Shutting down gracefully")
@@ -123,19 +145,37 @@ func main() {
 	// Exit code 0 (success already handled, failures exit earlier at line 52)
 }
 
-// continuousValidationLoop runs validate on every tick until ctx is cancelled.
+// continuousValidationLoop runs validate on every tick, and on every
+// file-change event when watchCh is non-nil, until ctx is cancelled.
 // maxConsecutiveFailures controls when readiness is revoked after repeated
-// failures; see handleValidationResult for the exact semantics.
+// failures; see handleValidationResult for the exact semantics. A nil watchCh
+// disables event-driven validation (interval polling only).
 func continuousValidationLoop(
-	ctx context.Context, tick <-chan time.Time, maxConsecutiveFailures int,
-	validate func() error, logger logr.Logger,
+	ctx context.Context, tick <-chan time.Time, watchCh <-chan struct{}, maxConsecutiveFailures int,
+	validate func(validationType string) error, logger logr.Logger,
 ) {
 	consecutiveFailures := 0
 	for {
 		select {
 		case <-tick:
 			logger.Info("Running periodic validation")
-			err := validate()
+			err := validate("periodic")
+			consecutiveFailures = handleValidationResult(err, consecutiveFailures, maxConsecutiveFailures)
+			if err != nil {
+				logger.Error(err, "Validation failed",
+					"consecutiveFailures", consecutiveFailures,
+					"maxConsecutiveFailures", maxConsecutiveFailures,
+					"ready", isReady())
+			} else {
+				logger.Info("Validation successful")
+			}
+		case _, ok := <-watchCh:
+			if !ok {
+				watchCh = nil
+				continue
+			}
+			logger.Info("File change detected, running validation")
+			err := validate("file-change")
 			consecutiveFailures = handleValidationResult(err, consecutiveFailures, maxConsecutiveFailures)
 			if err != nil {
 				logger.Error(err, "Validation failed",
