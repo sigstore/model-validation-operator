@@ -1,0 +1,283 @@
+# Alerting and SLO rules for the Model Validation Operator.
+#
+# Metric naming
+# -------------
+# Every metric is registered with the Prometheus namespace
+# "model_validation_operator" (see internal/metrics/metrics.go), so the exported
+# name is always prefixed, e.g. the Go-side "status_updates_total" is scraped as
+# "model_validation_operator_status_updates_total".
+#
+# Label rewriting
+# ---------------
+# The operator labels its metrics with "namespace" (the namespace of the watched
+# ModelValidation). The ServiceMonitor in monitor.yaml does not set
+# honorLabels: true, so Prometheus keeps the target's own "namespace" label (the
+# operator's namespace) and renames the metric's label to "exported_namespace".
+# The rules below therefore group by "exported_namespace" to identify the
+# watched namespace. If honorLabels is ever enabled on the ServiceMonitor, these
+# must become "namespace".
+#
+# SLOs
+# ----
+# Availability: 99% of ModelValidation status updates succeed (30d rolling).
+# Latency:      99% of ModelValidation status updates complete within 1s (30d rolling).
+#
+# Both SLOs have a 1% error budget. The burn-rate alerts follow the multiwindow,
+# multi-burn-rate approach from the Google SRE workbook: a fast burn (14.4x,
+# 1h/5m windows, 2% of the budget in an hour) pages, and a slow burn (6x,
+# 6h/30m windows) warns.
+#
+# When no status updates occur, the SLI ratios evaluate to NaN rather than 0.
+# This is intentional: no traffic means no signal, and NaN comparisons are
+# false, so idle periods neither fire alerts nor burn error budget.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: model-validation-operator
+    app.kubernetes.io/managed-by: kustomize
+    role: alert-rules
+  name: controller-manager-alerts
+  namespace: system
+spec:
+  groups:
+    # ------------------------------------------------------------------
+    # SLI recording rules
+    #
+    # Pre-computed failure ratios over the windows the burn-rate alerts
+    # need. Recording them keeps the alert expressions readable and avoids
+    # evaluating the same rate() four times per alert.
+    # ------------------------------------------------------------------
+    - name: model-validation-operator.slo.rules
+      interval: 30s
+      rules:
+        - record: model_validation_operator:status_update_failure:ratio_rate5m
+          expr: |
+            sum(rate(model_validation_operator_status_updates_total{result="failure"}[5m]))
+              /
+            sum(rate(model_validation_operator_status_updates_total[5m]))
+
+        - record: model_validation_operator:status_update_failure:ratio_rate30m
+          expr: |
+            sum(rate(model_validation_operator_status_updates_total{result="failure"}[30m]))
+              /
+            sum(rate(model_validation_operator_status_updates_total[30m]))
+
+        - record: model_validation_operator:status_update_failure:ratio_rate1h
+          expr: |
+            sum(rate(model_validation_operator_status_updates_total{result="failure"}[1h]))
+              /
+            sum(rate(model_validation_operator_status_updates_total[1h]))
+
+        - record: model_validation_operator:status_update_failure:ratio_rate6h
+          expr: |
+            sum(rate(model_validation_operator_status_updates_total{result="failure"}[6h]))
+              /
+            sum(rate(model_validation_operator_status_updates_total[6h]))
+
+        # Latency SLI: share of status updates slower than the 1s objective.
+        # le="1" is one of the client_golang default buckets, so no histogram
+        # reconfiguration is needed.
+        - record: model_validation_operator:status_update_slow:ratio_rate5m
+          expr: |
+            1 - (
+              sum(rate(model_validation_operator_status_update_duration_seconds_bucket{le="1"}[5m]))
+                /
+              sum(rate(model_validation_operator_status_update_duration_seconds_count[5m]))
+            )
+
+        - record: model_validation_operator:status_update_slow:ratio_rate30m
+          expr: |
+            1 - (
+              sum(rate(model_validation_operator_status_update_duration_seconds_bucket{le="1"}[30m]))
+                /
+              sum(rate(model_validation_operator_status_update_duration_seconds_count[30m]))
+            )
+
+        - record: model_validation_operator:status_update_slow:ratio_rate1h
+          expr: |
+            1 - (
+              sum(rate(model_validation_operator_status_update_duration_seconds_bucket{le="1"}[1h]))
+                /
+              sum(rate(model_validation_operator_status_update_duration_seconds_count[1h]))
+            )
+
+        - record: model_validation_operator:status_update_slow:ratio_rate6h
+          expr: |
+            1 - (
+              sum(rate(model_validation_operator_status_update_duration_seconds_bucket{le="1"}[6h]))
+                /
+              sum(rate(model_validation_operator_status_update_duration_seconds_count[6h]))
+            )
+
+    # ------------------------------------------------------------------
+    # SLO burn-rate alerts
+    #
+    # These are the page-worthy signals: they fire on how fast the error
+    # budget is being consumed, not on a raw threshold. Both windows must
+    # agree, which suppresses single-scrape spikes.
+    # ------------------------------------------------------------------
+    - name: model-validation-operator.slo.alerts
+      rules:
+        - alert: MVOStatusUpdateErrorBudgetBurnFast
+          expr: |
+            model_validation_operator:status_update_failure:ratio_rate5m > (14.4 * 0.01)
+              and
+            model_validation_operator:status_update_failure:ratio_rate1h > (14.4 * 0.01)
+          for: 2m
+          labels:
+            severity: critical
+            service: model-validation-operator
+            slo: status-update-availability
+          annotations:
+            summary: ModelValidation status updates are burning the availability error budget fast
+            description: >-
+              Status updates are failing at {{ $value | humanizePercentage }} over both the
+              5m and 1h windows, which is 14.4x the rate the 99% availability SLO allows.
+              At this rate 2% of the 30-day error budget is consumed within an hour.
+              ModelValidation resources are not reflecting the true state of their pods.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdateerrorbudgetburnfast
+
+        - alert: MVOStatusUpdateErrorBudgetBurnSlow
+          expr: |
+            model_validation_operator:status_update_failure:ratio_rate30m > (6 * 0.01)
+              and
+            model_validation_operator:status_update_failure:ratio_rate6h > (6 * 0.01)
+          for: 15m
+          labels:
+            severity: warning
+            service: model-validation-operator
+            slo: status-update-availability
+          annotations:
+            summary: ModelValidation status updates are steadily burning the availability error budget
+            description: >-
+              Status updates are failing at {{ $value | humanizePercentage }} over both the
+              30m and 6h windows, which is 6x the rate the 99% availability SLO allows.
+              Sustained at this rate the 30-day error budget is exhausted in about five days.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdateerrorbudgetburnslow
+
+        - alert: MVOStatusUpdateLatencyBudgetBurnFast
+          expr: |
+            model_validation_operator:status_update_slow:ratio_rate5m > (14.4 * 0.01)
+              and
+            model_validation_operator:status_update_slow:ratio_rate1h > (14.4 * 0.01)
+          for: 2m
+          labels:
+            severity: critical
+            service: model-validation-operator
+            slo: status-update-latency
+          annotations:
+            summary: ModelValidation status updates are burning the latency error budget fast
+            description: >-
+              {{ $value | humanizePercentage }} of status updates are taking longer than the
+              1s objective over both the 5m and 1h windows, 14.4x the rate the 99% latency
+              SLO allows. Check API server latency and the status update queue depth.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatelatencybudgetburnfast
+
+        - alert: MVOStatusUpdateLatencyBudgetBurnSlow
+          expr: |
+            model_validation_operator:status_update_slow:ratio_rate30m > (6 * 0.01)
+              and
+            model_validation_operator:status_update_slow:ratio_rate6h > (6 * 0.01)
+          for: 15m
+          labels:
+            severity: warning
+            service: model-validation-operator
+            slo: status-update-latency
+          annotations:
+            summary: ModelValidation status updates are steadily burning the latency error budget
+            description: >-
+              {{ $value | humanizePercentage }} of status updates are taking longer than the
+              1s objective over both the 30m and 6h windows, 6x the rate the 99% latency SLO
+              allows.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatelatencybudgetburnslow
+
+    # ------------------------------------------------------------------
+    # Operational alerts
+    #
+    # Symptom-level alerts on conditions that are actionable on their own
+    # and are not covered by an SLO.
+    # ------------------------------------------------------------------
+    - name: model-validation-operator.operational.alerts
+      rules:
+        - alert: MVOHighConfigurationDriftRate
+          expr: |
+            sum by (exported_namespace, model_validation, drift_type) (
+              rate(model_validation_operator_configuration_drift_events_total[5m])
+            ) > 0.1
+          for: 15m
+          labels:
+            severity: warning
+            service: model-validation-operator
+          annotations:
+            summary: High configuration drift rate for a ModelValidation
+            description: >-
+              ModelValidation {{ $labels.exported_namespace }}/{{ $labels.model_validation }}
+              is reporting {{ $value | printf "%.2f" }} drift events per second of type
+              "{{ $labels.drift_type }}". Running pods are validating against a configuration
+              that no longer matches the CR, so they are not protected by the current policy.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/configuration-drift.md
+
+        - alert: MVOStatusUpdateFailureRate
+          expr: model_validation_operator:status_update_failure:ratio_rate5m > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            service: model-validation-operator
+          annotations:
+            summary: ModelValidation status updates are failing
+            description: >-
+              {{ $value | humanizePercentage }} of status updates have failed over the last
+              5 minutes. This is an early symptom alert; if it persists the availability
+              burn-rate alerts will escalate it to critical.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatefailurerate
+
+        - alert: MVOHighRetryAttempts
+          expr: |
+            sum by (exported_namespace, model_validation) (
+              rate(model_validation_operator_status_update_retry_attempts_total[5m])
+            ) > 1
+          for: 15m
+          labels:
+            severity: warning
+            service: model-validation-operator
+          annotations:
+            summary: Excessive status update retries for a ModelValidation
+            description: >-
+              ModelValidation {{ $labels.exported_namespace }}/{{ $labels.model_validation }}
+              is retrying status updates {{ $value | printf "%.2f" }} times per second. Sustained
+              retries usually point at API server pressure or conflicting writes on the CR.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvohighretryattempts
+
+        - alert: MVOStatusUpdateQueueBacklog
+          expr: model_validation_operator_status_update_queue_size > 50
+          for: 10m
+          labels:
+            severity: warning
+            service: model-validation-operator
+          annotations:
+            summary: ModelValidation status update queue is backing up
+            description: >-
+              The status update queue has held more than 50 items for 10 minutes (currently
+              {{ $value }}). Status updates are falling behind the rate of incoming pod
+              events, so reported state is increasingly stale.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatequeuebacklog
+
+        - alert: MVOStatusUpdateLatencyHigh
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (rate(model_validation_operator_status_update_duration_seconds_bucket[5m]))
+            ) > 5
+          for: 15m
+          labels:
+            severity: warning
+            service: model-validation-operator
+          annotations:
+            summary: ModelValidation status update p99 latency is high
+            description: >-
+              The p99 status update duration is {{ $value | humanizeDuration }}, above the 5s
+              threshold. Note the histogram's largest bucket is 10s, so values beyond that are
+              estimated from the +Inf bucket and should be read as "very slow" rather than exact.
+            runbook_url: https://github.com/sigstore/model-validation-operator/blob/main/docs/operations/runbooks/README.md#mvostatusupdatelatencyhigh
